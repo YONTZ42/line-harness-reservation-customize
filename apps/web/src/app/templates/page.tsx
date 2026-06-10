@@ -1,0 +1,774 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import type { ReactNode } from 'react'
+import type { Template } from '@line-harness/sdk'
+import Header from '@/components/layout/header'
+import CcPromptButton from '@/components/cc-prompt-button'
+import FlexPreviewComponent from '@/components/flex-preview'
+import { api, type ApiProviderConfig } from '@/lib/api'
+import { createLineHarnessClient } from '@/lib/line-harness-client'
+import {
+  DEFAULT_RESERVATION_CARD,
+  bookingUrlFromApiBase,
+  buildProviderReservationCard,
+  type ReservationCardForm,
+} from '@/lib/provider-ui'
+
+const messageTypeLabels: Record<string, string> = {
+  text: 'テキスト',
+  image: '画像',
+  flex: 'Flex',
+}
+
+interface CreateFormState {
+  name: string
+  category: string
+  messageType: string
+  messageContent: string
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleString('ja-JP', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+async function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+const ccPrompts = [
+  {
+    title: 'テンプレート作成',
+    prompt: `新しいメッセージテンプレートの作成をサポートしてください。
+1. 用途別（挨拶、キャンペーン、通知、フォローアップ）のテンプレート文例を提案
+2. テキスト・画像・Flexメッセージそれぞれの効果的な使い方
+3. カテゴリ分類と命名規則のベストプラクティス
+手順を示してください。`,
+  },
+  {
+    title: 'テンプレート整理',
+    prompt: `既存のテンプレートを整理・最適化してください。
+1. カテゴリ別のテンプレート数と使用頻度を分析
+2. 重複・類似テンプレートの統合提案
+3. 不足しているカテゴリやテンプレートの追加推奨
+結果をレポートしてください。`,
+  },
+]
+
+export default function TemplatesPage() {
+  const [templates, setTemplates] = useState<Template[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [showCreate, setShowCreate] = useState(false)
+  const [selectedCategory, setSelectedCategory] = useState<string>('all')
+  const [form, setForm] = useState<CreateFormState>({
+    name: '',
+    category: '',
+    messageType: 'text',
+    messageContent: '',
+  })
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<CreateFormState>({
+    name: '',
+    category: '',
+    messageType: 'text',
+    messageContent: '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState('')
+  const [showReservationCard, setShowReservationCard] = useState(false)
+  const [uploadingCardImage, setUploadingCardImage] = useState(false)
+  const [providerConfig, setProviderConfig] = useState<ApiProviderConfig | null>(null)
+  const [reservationCard, setReservationCard] = useState<ReservationCardForm>(DEFAULT_RESERVATION_CARD)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const client = createLineHarnessClient()
+      setTemplates(await client.templates.list(selectedCategory !== 'all' ? selectedCategory : undefined))
+    } catch {
+      setError('テンプレートの読み込みに失敗しました。もう一度お試しください。')
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedCategory])
+
+  const loadProviderConfig = useCallback(async () => {
+    try {
+      const res = await api.providerConfig.get()
+      if (res.success) setProviderConfig(res.data)
+    } catch {
+      // Keep legacy AONISAI defaults if provider config cannot be loaded.
+    }
+  }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  useEffect(() => {
+    loadProviderConfig()
+  }, [loadProviderConfig])
+
+  useEffect(() => {
+    if (!providerConfig) return
+    setReservationCard((current) => buildProviderReservationCard(
+      current,
+      providerConfig,
+      bookingUrlFromApiBase(process.env.NEXT_PUBLIC_API_URL),
+    ))
+  }, [providerConfig])
+
+  const categories = Array.from(
+    new Set(templates.map((t) => t.category).filter(Boolean))
+  )
+
+  const handleCreate = async () => {
+    if (!form.name.trim()) {
+      setFormError('テンプレート名を入力してください')
+      return
+    }
+    if (!form.category.trim()) {
+      setFormError('カテゴリを入力してください')
+      return
+    }
+    if (!form.messageContent.trim()) {
+      setFormError('メッセージ内容を入力してください')
+      return
+    }
+    setSaving(true)
+    setFormError('')
+    try {
+      const client = createLineHarnessClient()
+      await client.templates.create({
+        name: form.name,
+        category: form.category,
+        messageType: form.messageType as 'text' | 'image' | 'flex',
+        messageContent: form.messageContent,
+      })
+      setShowCreate(false)
+      setForm({ name: '', category: '', messageType: 'text', messageContent: '' })
+      await load()
+    } catch {
+      setFormError('作成に失敗しました')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('このテンプレートを削除してもよいですか？')) return
+    try {
+      const client = createLineHarnessClient()
+      await client.templates.delete(id)
+      await load()
+    } catch {
+      setError('削除に失敗しました')
+    }
+  }
+
+  const startEdit = (template: Template) => {
+    setShowCreate(false)
+    setShowReservationCard(false)
+    setFormError('')
+    setEditingTemplateId(template.id)
+    setEditForm({
+      name: template.name,
+      category: template.category,
+      messageType: template.messageType,
+      messageContent: template.messageContent,
+    })
+  }
+
+  const cancelEdit = () => {
+    setEditingTemplateId(null)
+    setFormError('')
+    setEditForm({ name: '', category: '', messageType: 'text', messageContent: '' })
+  }
+
+  const handleUpdate = async () => {
+    if (!editingTemplateId) return
+    if (!editForm.name.trim()) {
+      setFormError('テンプレート名を入力してください')
+      return
+    }
+    if (!editForm.category.trim()) {
+      setFormError('カテゴリを入力してください')
+      return
+    }
+    if (!editForm.messageContent.trim()) {
+      setFormError('メッセージ内容を入力してください')
+      return
+    }
+    setSaving(true)
+    setFormError('')
+    try {
+      const client = createLineHarnessClient()
+      await client.templates.update(editingTemplateId, {
+        name: editForm.name,
+        category: editForm.category,
+        messageType: editForm.messageType as 'text' | 'image' | 'flex',
+        messageContent: editForm.messageContent,
+      })
+      cancelEdit()
+      await load()
+    } catch {
+      setFormError('更新に失敗しました')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const reservationCardJson = buildReservationFlexCard(reservationCard)
+  const canCreateReservationCard = Boolean(
+    reservationCard.title.trim() &&
+    reservationCard.body.trim() &&
+    reservationCard.buttonLabel.trim() &&
+    reservationCard.reservationUrl.trim().startsWith('https://')
+  )
+
+  const handleCreateReservationCard = async () => {
+    if (!canCreateReservationCard || saving) {
+      setFormError('タイトル、本文、ボタン名、https:// で始まる予約URLを入力してください')
+      return
+    }
+    setSaving(true)
+    setFormError('')
+    try {
+      const client = createLineHarnessClient()
+      await client.templates.create({
+        name: `予約導線カード - ${reservationCard.title.trim()}`,
+        category: '予約',
+        messageType: 'flex',
+        messageContent: reservationCardJson,
+      })
+      setShowReservationCard(false)
+      await load()
+    } catch {
+      setFormError('予約導線カードの作成に失敗しました')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleReservationImageUpload = async (file: File | undefined) => {
+    if (!file) return
+    if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type)) {
+      setFormError('画像は PNG / JPEG / GIF / WebP を選択してください')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setFormError('画像は5MB以下にしてください')
+      return
+    }
+    setUploadingCardImage(true)
+    setFormError('')
+    try {
+      const client = createLineHarnessClient()
+      const uploaded = await client.images.upload({
+        data: await fileToDataUrl(file),
+        mimeType: file.type,
+        filename: file.name,
+      })
+      setReservationCard((prev) => ({ ...prev, imageUrl: uploaded.url }))
+    } catch {
+      setFormError('画像アップロードに失敗しました。R2 bindingとWorker URLを確認してください')
+    } finally {
+      setUploadingCardImage(false)
+    }
+  }
+
+  return (
+    <div>
+      <Header
+        title="テンプレート管理"
+        action={
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => { setShowReservationCard(true); setShowCreate(false) }}
+              className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
+              style={{ backgroundColor: '#06C755' }}
+            >
+              予約導線カードを作成
+            </button>
+            <button
+              onClick={() => { setShowCreate(true); setShowReservationCard(false) }}
+              className="px-4 py-2 text-sm font-medium text-gray-700 rounded-lg bg-gray-100 hover:bg-gray-200"
+            >
+              + 新規テンプレート
+            </button>
+          </div>
+        }
+      />
+
+      {/* Error */}
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+          {error}
+        </div>
+      )}
+
+      {showReservationCard && (
+        <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-800">予約導線カード設定</h2>
+              <p className="mt-1 text-xs text-gray-500">フォーム入力からLINE FlexカードJSONを作成し、テンプレートとして保存します。</p>
+            </div>
+            <button onClick={() => setShowReservationCard(false)} className="text-xs text-gray-500 hover:text-gray-700">閉じる</button>
+          </div>
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="space-y-4">
+              <Field label="カードタイトル">
+                <input
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  value={reservationCard.title}
+                  onChange={(e) => setReservationCard({ ...reservationCard, title: e.target.value })}
+                />
+              </Field>
+              <Field label="説明文">
+                <textarea
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none"
+                  rows={3}
+                  value={reservationCard.body}
+                  onChange={(e) => setReservationCard({ ...reservationCard, body: e.target.value })}
+                />
+              </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="ボタン表示">
+                  <input
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    value={reservationCard.buttonLabel}
+                    onChange={(e) => setReservationCard({ ...reservationCard, buttonLabel: e.target.value })}
+                  />
+                </Field>
+                <Field label="フッター">
+                  <input
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    value={reservationCard.footer}
+                    onChange={(e) => setReservationCard({ ...reservationCard, footer: e.target.value })}
+                  />
+                </Field>
+              </div>
+              <Field label="予約URL">
+                <input
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  placeholder="https://line-harness-reservation.../?page=book"
+                  value={reservationCard.reservationUrl}
+                  onChange={(e) => setReservationCard({ ...reservationCard, reservationUrl: e.target.value })}
+                />
+              </Field>
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-blue-900">カード画像</p>
+                    <p className="mt-1 text-xs leading-5 text-blue-800">
+                      画像をR2に保存し、LINEが取得できる公開URLをカードに入れます。5MB以下のPNG/JPEG/GIF/WebPに対応します。
+                    </p>
+                  </div>
+                  {uploadingCardImage && <span className="shrink-0 text-xs text-blue-700">アップロード中...</span>}
+                </div>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  disabled={uploadingCardImage}
+                  onChange={(e) => void handleReservationImageUpload(e.target.files?.[0])}
+                  className="mt-3 block w-full text-xs text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:font-medium file:text-blue-700 disabled:opacity-50"
+                />
+                {reservationCard.imageUrl && (
+                  <div className="mt-3 rounded-lg border border-blue-100 bg-white p-3">
+                    <input readOnly value={reservationCard.imageUrl} className="w-full rounded border border-gray-200 px-2 py-1 font-mono text-xs text-gray-600" />
+                    <img src={reservationCard.imageUrl} alt="予約導線カード画像" className="mt-3 max-h-36 rounded-lg border border-gray-100 object-contain" />
+                  </div>
+                )}
+                <Field label="画像URLを直接指定する場合">
+                  <input
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    placeholder="https://..."
+                    value={reservationCard.imageUrl}
+                    onChange={(e) => setReservationCard({ ...reservationCard, imageUrl: e.target.value })}
+                  />
+                </Field>
+              </div>
+              <details className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <summary className="cursor-pointer text-xs font-semibold text-gray-700">生成されるFlex JSONを確認</summary>
+                <textarea readOnly value={reservationCardJson} rows={10} className="mt-3 w-full rounded-lg border border-gray-200 bg-white p-3 font-mono text-xs text-gray-700" />
+              </details>
+              {formError && <p className="text-xs text-red-600">{formError}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCreateReservationCard}
+                  disabled={!canCreateReservationCard || saving}
+                  className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50"
+                  style={{ backgroundColor: '#06C755' }}
+                >
+                  {saving ? '作成中...' : 'テンプレート保存'}
+                </button>
+                <button
+                  onClick={() => setShowReservationCard(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-medium text-gray-600">プレビュー</p>
+              <FlexPreviewComponent content={reservationCardJson} maxWidth={320} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingTemplateId && (
+        <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-800">テンプレートを編集</h2>
+              <p className="mt-1 text-xs text-gray-500">
+                保存済みテンプレートを更新します。自動化で内容コピー済みのJSONは自動更新されません。
+              </p>
+            </div>
+            <button onClick={cancelEdit} className="text-xs text-gray-500 hover:text-gray-700">閉じる</button>
+          </div>
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="space-y-4">
+              <Field label="テンプレート名">
+                <input
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                />
+              </Field>
+              <Field label="カテゴリ">
+                <input
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  value={editForm.category}
+                  onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                />
+              </Field>
+              <Field label="メッセージタイプ">
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                  value={editForm.messageType}
+                  onChange={(e) => setEditForm({ ...editForm, messageType: e.target.value })}
+                >
+                  <option value="text">テキスト</option>
+                  <option value="image">画像</option>
+                  <option value="flex">Flex</option>
+                </select>
+              </Field>
+              <Field label="メッセージ内容">
+                <textarea
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
+                  rows={editForm.messageType === 'flex' ? 12 : 5}
+                  value={editForm.messageContent}
+                  onChange={(e) => setEditForm({ ...editForm, messageContent: e.target.value })}
+                />
+              </Field>
+              {formError && <p className="text-xs text-red-600">{formError}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleUpdate}
+                  disabled={saving}
+                  className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50"
+                  style={{ backgroundColor: '#06C755' }}
+                >
+                  {saving ? '保存中...' : '保存'}
+                </button>
+                <button
+                  onClick={cancelEdit}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-medium text-gray-600">プレビュー</p>
+              {editForm.messageType === 'flex' ? (
+                <FlexPreviewComponent content={editForm.messageContent} maxWidth={320} />
+              ) : editForm.messageType === 'image' ? (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <img src={editForm.messageContent} alt="画像テンプレート" className="max-h-64 rounded-lg object-contain" />
+                </div>
+              ) : (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 whitespace-pre-wrap">
+                  {editForm.messageContent || 'テキストのプレビューがここに表示されます。'}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Category filter */}
+      {!loading && categories.length > 0 && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button
+            onClick={() => setSelectedCategory('all')}
+            className={`px-3 py-1.5 min-h-[44px] text-xs font-medium rounded-full transition-colors ${
+              selectedCategory === 'all'
+                ? 'text-white'
+                : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+            }`}
+            style={selectedCategory === 'all' ? { backgroundColor: '#06C755' } : undefined}
+          >
+            全て
+          </button>
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setSelectedCategory(cat)}
+              className={`px-3 py-1.5 min-h-[44px] text-xs font-medium rounded-full transition-colors ${
+                selectedCategory === cat
+                  ? 'text-white'
+                  : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+              }`}
+              style={selectedCategory === cat ? { backgroundColor: '#06C755' } : undefined}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Create form */}
+      {showCreate && (
+        <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h2 className="text-sm font-semibold text-gray-800 mb-4">新規テンプレートを作成</h2>
+          <div className="space-y-4 max-w-lg">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">テンプレート名 <span className="text-red-500">*</span></label>
+              <input
+                type="text"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                placeholder="例: ウェルカムメッセージ"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">カテゴリ <span className="text-red-500">*</span></label>
+              <input
+                type="text"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                placeholder="例: 挨拶、キャンペーン、通知"
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">メッセージタイプ</label>
+              <select
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                value={form.messageType}
+                onChange={(e) => setForm({ ...form, messageType: e.target.value })}
+              >
+                <option value="text">テキスト</option>
+                <option value="image">画像</option>
+                <option value="flex">Flex</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">メッセージ内容 <span className="text-red-500">*</span></label>
+              <textarea
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+                rows={4}
+                placeholder="メッセージ内容を入力してください"
+                value={form.messageContent}
+                onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
+              />
+            </div>
+
+            {formError && <p className="text-xs text-red-600">{formError}</p>}
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleCreate}
+                disabled={saving}
+                className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
+                style={{ backgroundColor: '#06C755' }}
+              >
+                {saving ? '作成中...' : '作成'}
+              </button>
+              <button
+                onClick={() => { setShowCreate(false); setFormError('') }}
+                className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Loading skeleton */}
+      {loading ? (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="px-4 py-4 border-b border-gray-100 flex items-center gap-4 animate-pulse">
+              <div className="flex-1 space-y-2">
+                <div className="h-3 bg-gray-200 rounded w-48" />
+                <div className="h-2 bg-gray-100 rounded w-32" />
+              </div>
+              <div className="h-5 bg-gray-100 rounded-full w-16" />
+              <div className="h-3 bg-gray-100 rounded w-24" />
+            </div>
+          ))}
+        </div>
+      ) : templates.length === 0 && !showCreate ? (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+          <p className="text-gray-500">テンプレートがありません。「新規テンプレート」から作成してください。</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px]">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  テンプレート名
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  カテゴリ
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  メッセージタイプ
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  作成日時
+                </th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {templates.map((template) => (
+                <tr key={template.id} className="hover:bg-gray-50 transition-colors">
+                  {/* Name */}
+                  <td className="px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{template.name}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">
+                        {template.messageContent.slice(0, 50)}
+                        {template.messageContent.length > 50 ? '...' : ''}
+                      </p>
+                    </div>
+                  </td>
+
+                  {/* Category */}
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                      {template.category}
+                    </span>
+                  </td>
+
+                  {/* Message Type */}
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    {messageTypeLabels[template.messageType] || template.messageType}
+                  </td>
+
+                  {/* Created At */}
+                  <td className="px-4 py-3 text-sm text-gray-500">
+                    {formatDate(template.createdAt)}
+                  </td>
+
+                  {/* Actions */}
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => startEdit(template)}
+                        className="px-3 py-1 text-xs font-medium text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                      >
+                        編集
+                      </button>
+                      <button
+                        onClick={() => handleDelete(template.id)}
+                        className="px-3 py-1 text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
+                      >
+                        削除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        </div>
+      )}
+      <CcPromptButton prompts={ccPrompts} />
+    </div>
+  )
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-gray-600 mb-1">{label}</span>
+      {children}
+    </label>
+  )
+}
+
+function buildReservationFlexCard(input: ReservationCardForm): string {
+  const title = input.title.trim() || '予約はこちら'
+  const body = input.body.trim() || '予約画面から日付と時間を選択してください。'
+  const buttonLabel = input.buttonLabel.trim() || '予約する'
+  const reservationUrl = input.reservationUrl.trim()
+  const footer = input.footer.trim()
+  const imageUrl = input.imageUrl.trim()
+  const primaryColor = input.primaryColor.trim() || '#69A3D0'
+
+  const bubble: Record<string, unknown> = {
+    type: 'bubble',
+    size: 'mega',
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'md',
+      contents: [
+        { type: 'text', text: title, weight: 'bold', size: 'xl', wrap: true, color: primaryColor },
+        { type: 'text', text: body, size: 'sm', wrap: true, color: '#4B5563' },
+      ],
+    },
+    footer: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      contents: [
+        {
+          type: 'button',
+          style: 'primary',
+          color: primaryColor,
+          action: { type: 'uri', label: buttonLabel, uri: reservationUrl || 'https://example.com' },
+        },
+        ...(footer ? [{ type: 'text', text: footer, size: 'xs', align: 'center', color: '#6B7280', wrap: true }] : []),
+      ],
+    },
+  }
+
+  if (imageUrl) {
+    bubble.hero = {
+      type: 'image',
+      url: imageUrl,
+      size: 'full',
+      aspectRatio: '20:13',
+      aspectMode: 'cover',
+    }
+  }
+
+  return JSON.stringify(bubble, null, 2)
+}

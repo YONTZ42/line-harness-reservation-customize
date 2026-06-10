@@ -1,0 +1,26 @@
+{
+  "name": "line-oss-crm",
+  "version": "0.8.0",
+  "private": true,
+  "description": "Open-source LINE Official Account CRM/marketing automation",
+  "scripts": {
+    "dev:worker": "pnpm --filter worker dev",
+    "dev:web": "pnpm --filter web dev",
+    "build": "pnpm -r build",
+    "deploy:worker": "pnpm --filter worker deploy",
+    "deploy:web": "pnpm --filter web build",
+    "db:migrate": "wrangler d1 execute line-harness --config apps/worker/wrangler.toml --file=packages/db/schema.sql",
+    "db:migrate:local": "wrangler d1 execute line-harness --config apps/worker/wrangler.toml --file=packages/db/schema.sql --local",
+    "db:seed:reservations:local": "wrangler d1 execute line-harness --config apps/worker/wrangler.toml --file=packages/db/seeds/reservations.local.sql --local",
+    "deploy:setup": "node packages/create-line-harness/dist/index.js",
+    "deploy:update": "node packages/create-line-harness/dist/index.js update"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "wrangler": "4"
+  }
+}

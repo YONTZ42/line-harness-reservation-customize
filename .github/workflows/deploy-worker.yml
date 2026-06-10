@@ -1,0 +1,339 @@
+name: Deploy Worker
+
+# Required GitHub Secrets:
+# - CLOUDFLARE_API_TOKEN
+# - CLOUDFLARE_D1_DATABASE_ID
+#
+# Optional GitHub Variables:
+# - CLOUDFLARE_ACCOUNT_ID        can be a Secret or Variable
+# - WORKER_NAME                  default: line-harness-reservation
+# - CLOUDFLARE_D1_DATABASE_NAME   default: line-crm
+# - CLOUDFLARE_R2_BUCKET_NAME     default: line-harness-images
+# - CLOUDFLARE_SECRETS_STORE_ID   binds Cloudflare Secrets Store secrets when set
+# - CLOUDFLARE_SECRETS_STORE_BINDINGS
+#     optional comma-separated map: BINDING_NAME=SECRET_NAME,OTHER_NAME
+#     when omitted, only required Worker secret binding names are used as secret names
+on:
+  workflow_dispatch:
+    inputs:
+      run_d1_compatibility_patches:
+        description: 'Apply D1 compatibility patches before deploy. Prefer migrate-d1.yml for schema changes.'
+        required: false
+        type: boolean
+        default: false
+  
+  push:
+    branches: [main]
+    paths:
+      - 'apps/worker/**'
+      - 'packages/db/**'
+      - 'packages/shared/**'
+      - 'packages/line-sdk/**'
+      - '.github/workflows/deploy-worker.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @line-crm/shared --filter @line-crm/line-sdk --filter @line-crm/db build
+      - run: pnpm --filter @line-crm/db test
+      - run: pnpm --filter @line-harness/sdk test
+
+      - name: Remove local dev secrets
+        run: rm -f apps/worker/.dev.vars
+
+      - name: Apply D1 compatibility patches
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_d1_compatibility_patches == true }}
+        working-directory: apps/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          CF_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          CF_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const accountId = process.env.CF_ACCOUNT_ID?.trim();
+          const databaseId = process.env.CF_D1_DATABASE_ID?.trim();
+          const databaseName = process.env.CF_D1_DATABASE_NAME?.trim() || 'line-crm';
+
+          if (!accountId) throw new Error('CF_ACCOUNT_ID is required');
+          if (!databaseId) throw new Error('CF_D1_DATABASE_ID is required');
+
+          fs.writeFileSync('.wrangler-d1-ci.json', JSON.stringify({
+            name: 'line-harness-d1-migration',
+            account_id: accountId,
+            compatibility_date: '2024-12-01',
+            d1_databases: [{
+              binding: 'DB',
+              database_name: databaseName,
+              database_id: databaseId,
+            }],
+          }, null, 2));
+          NODE
+          db="${CF_D1_DATABASE_NAME:-line-crm}"
+          wrangler_d1() {
+            pnpm exec wrangler d1 execute "$db" --remote --config .wrangler-d1-ci.json "$@"
+          }
+          d1_column_exists() {
+            table="$1"
+            column="$2"
+            set +e
+            output=$(wrangler_d1 --command "SELECT name FROM pragma_table_info('$table') WHERE name = '$column'" 2>&1)
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ]; then
+              echo "$output"
+              return 1
+            fi
+            echo "$output" | grep -q "$column"
+          }
+          d1_add_column_if_missing() {
+            table="$1"
+            column="$2"
+            definition="$3"
+            if d1_column_exists "$table" "$column"; then
+              echo "D1 patch skipped: $table.$column already exists."
+              return 0
+            fi
+            wrangler_d1 --command "ALTER TABLE $table ADD COLUMN $column $definition"
+          }
+          d1_table_sql_contains() {
+            table="$1"
+            pattern="$2"
+            set +e
+            output=$(wrangler_d1 --command "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '$table'" 2>&1)
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ]; then
+              echo "$output"
+              return 1
+            fi
+            echo "$output" | grep -q "$pattern"
+          }
+
+          # Do not execute packages/db/schema.sql against an existing production DB.
+          # CREATE TABLE IF NOT EXISTS does not add newly introduced columns, so
+          # later CREATE INDEX statements can fail with "no such column".
+          # Apply only additive, idempotent compatibility patches here.
+          wrangler_d1 --command "CREATE TABLE IF NOT EXISTS entry_routes (id TEXT PRIMARY KEY, ref_code TEXT UNIQUE NOT NULL, name TEXT NOT NULL, tag_id TEXT REFERENCES tags (id) ON DELETE SET NULL, scenario_id TEXT REFERENCES scenarios (id) ON DELETE SET NULL, redirect_url TEXT, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')))"
+          wrangler_d1 --command "CREATE TABLE IF NOT EXISTS ref_tracking (id TEXT PRIMARY KEY, ref_code TEXT NOT NULL, friend_id TEXT REFERENCES friends (id) ON DELETE CASCADE, entry_route_id TEXT REFERENCES entry_routes (id) ON DELETE SET NULL, source_url TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))"
+          wrangler_d1 --command "CREATE INDEX IF NOT EXISTS idx_entry_routes_ref ON entry_routes (ref_code)"
+          wrangler_d1 --command "CREATE INDEX IF NOT EXISTS idx_ref_tracking_ref ON ref_tracking (ref_code)"
+          wrangler_d1 --command "CREATE INDEX IF NOT EXISTS idx_ref_tracking_friend ON ref_tracking (friend_id)"
+          wrangler_d1 --file ../../packages/db/migrations/006_tracked_links.sql || true
+          wrangler_d1 --file ../../packages/db/migrations/007_forms.sql || true
+          wrangler_d1 --file ../../packages/db/migrations/024_form_opens.sql || true
+
+          # Google Calendar integration tables. Safe for existing production DBs.
+          wrangler_d1 --command "CREATE TABLE IF NOT EXISTS google_calendar_connections (id TEXT PRIMARY KEY, calendar_id TEXT NOT NULL, access_token TEXT, access_token_expires_at TEXT, refresh_token TEXT, api_key TEXT, auth_type TEXT NOT NULL DEFAULT 'api_key', is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')), updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')))"
+          wrangler_d1 --command "CREATE TABLE IF NOT EXISTS calendar_bookings (id TEXT PRIMARY KEY, connection_id TEXT NOT NULL REFERENCES google_calendar_connections (id) ON DELETE CASCADE, friend_id TEXT REFERENCES friends (id) ON DELETE SET NULL, event_id TEXT, title TEXT NOT NULL, start_at TEXT NOT NULL, end_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'confirmed' CHECK (status IN ('confirmed', 'cancelled', 'completed')), metadata TEXT, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')), updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')))"
+          wrangler_d1 --command "CREATE INDEX IF NOT EXISTS idx_calendar_bookings_friend ON calendar_bookings (friend_id)"
+          wrangler_d1 --command "CREATE INDEX IF NOT EXISTS idx_calendar_bookings_start ON calendar_bookings (start_at)"
+          wrangler_d1 --file ../../packages/db/migrations/032_gmail_import_rules.sql
+
+          if d1_table_sql_contains reservations "'web'" && d1_table_sql_contains reservation_customer_profiles "'web'"; then
+            echo "D1 patch skipped: reservation source already accepts web."
+          else
+            wrangler_d1 --file ../../packages/db/migrations/036_reservation_source_web.sql
+          fi
+
+          d1_add_column_if_missing friends line_account_id "TEXT"
+          d1_add_column_if_missing friends ref_code "TEXT"
+          d1_add_column_if_missing chats line_account_id "TEXT"
+          d1_add_column_if_missing reservation_resources google_calendar_connection_id "TEXT"
+          d1_add_column_if_missing reservation_resources slot_interval_minutes "INTEGER NOT NULL DEFAULT 60"
+          d1_add_column_if_missing reservation_resources timezone "TEXT NOT NULL DEFAULT 'Asia/Tokyo'"
+          d1_add_column_if_missing reservation_menus price_infant "INTEGER"
+          d1_add_column_if_missing reservation_menus capacity_count_adult "INTEGER NOT NULL DEFAULT 1 CHECK (capacity_count_adult IN (0, 1))"
+          d1_add_column_if_missing reservation_menus capacity_count_child "INTEGER NOT NULL DEFAULT 1 CHECK (capacity_count_child IN (0, 1))"
+          d1_add_column_if_missing reservation_menus capacity_count_infant "INTEGER NOT NULL DEFAULT 1 CHECK (capacity_count_infant IN (0, 1))"
+          d1_add_column_if_missing reservations infant_count "INTEGER NOT NULL DEFAULT 0"
+          d1_add_column_if_missing reservations capacity_people "INTEGER NOT NULL DEFAULT 0"
+          d1_add_column_if_missing reservation_items infant_count "INTEGER NOT NULL DEFAULT 0"
+          d1_add_column_if_missing reservation_items capacity_people "INTEGER NOT NULL DEFAULT 0"
+          d1_add_column_if_missing tracked_links intro_template_id "TEXT"
+          d1_add_column_if_missing tracked_links reward_template_id "TEXT"
+          d1_add_column_if_missing forms on_submit_message_type "TEXT"
+          d1_add_column_if_missing forms on_submit_message_content "TEXT"
+          d1_add_column_if_missing forms on_submit_webhook_url "TEXT"
+          d1_add_column_if_missing forms on_submit_webhook_headers "TEXT"
+          d1_add_column_if_missing forms on_submit_webhook_fail_message "TEXT"
+          d1_add_column_if_missing ref_tracking fbclid "TEXT"
+          d1_add_column_if_missing ref_tracking gclid "TEXT"
+          d1_add_column_if_missing ref_tracking twclid "TEXT"
+          d1_add_column_if_missing ref_tracking ttclid "TEXT"
+          d1_add_column_if_missing ref_tracking utm_source "TEXT"
+          d1_add_column_if_missing ref_tracking utm_medium "TEXT"
+          d1_add_column_if_missing ref_tracking utm_campaign "TEXT"
+          d1_add_column_if_missing ref_tracking user_agent "TEXT"
+          d1_add_column_if_missing ref_tracking ip_address "TEXT"
+
+          wrangler_d1 --command "CREATE INDEX IF NOT EXISTS idx_friends_line_account_id ON friends (line_account_id)"
+          wrangler_d1 --command "CREATE INDEX IF NOT EXISTS idx_friends_ref_code ON friends (ref_code)"
+          wrangler_d1 --command "CREATE INDEX IF NOT EXISTS idx_chats_line_account_id ON chats (line_account_id)"
+          wrangler_d1 --command "CREATE INDEX IF NOT EXISTS idx_ref_tracking_entry_route ON ref_tracking (entry_route_id)"
+          wrangler_d1 --command "CREATE INDEX IF NOT EXISTS idx_reservation_resources_account ON reservation_resources (line_account_id)"
+          wrangler_d1 --file ../../packages/db/migrations/037_rich_menu_assets.sql
+
+      - run: pnpm --filter worker build
+        env:
+          VITE_LIFF_ID: ${{ vars.VITE_LIFF_ID }}
+          VITE_BOT_BASIC_ID: ${{ vars.VITE_BOT_BASIC_ID }}
+          VITE_CALENDAR_CONNECTION_ID: ${{ vars.VITE_CALENDAR_CONNECTION_ID }}
+
+      - name: Remove generated dev secrets
+        run: find apps/worker/dist -name .dev.vars -type f -delete
+
+      - name: Generate Cloudflare deploy config
+        working-directory: apps/worker
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          CF_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          CF_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
+          CF_R2_BUCKET_NAME: ${{ vars.CLOUDFLARE_R2_BUCKET_NAME }}
+          CF_WORKER_NAME: ${{ vars.WORKER_NAME }}
+          CF_SECRETS_STORE_ID: ${{ vars.CLOUDFLARE_SECRETS_STORE_ID }}
+          CF_SECRETS_STORE_BINDINGS: ${{ vars.CLOUDFLARE_SECRETS_STORE_BINDINGS }}
+          WORKER_URL: ${{ vars.WORKER_URL }}
+          LIFF_URL: ${{ vars.LIFF_URL }}
+          LINE_CHANNEL_ID: ${{ vars.LINE_CHANNEL_ID }}
+          LINE_LOGIN_CHANNEL_ID: ${{ vars.LINE_LOGIN_CHANNEL_ID }}
+          GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_REDIRECT_URI: ${{ vars.GOOGLE_OAUTH_REDIRECT_URI }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const required = {
+            CF_ACCOUNT_ID: process.env.CF_ACCOUNT_ID,
+            CF_D1_DATABASE_ID: process.env.CF_D1_DATABASE_ID,
+          };
+
+          for (const [key, value] of Object.entries(required)) {
+            if (!value) throw new Error(`${key} is required`);
+          }
+
+          const distDir = path.join(process.cwd(), 'dist');
+          const candidates = fs.readdirSync(distDir)
+            .map((name) => path.join(distDir, name, 'wrangler.json'))
+            .filter((file) => fs.existsSync(file))
+            .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+
+          if (candidates.length === 0) throw new Error('Generated wrangler.json was not found');
+
+          const sourcePath = candidates[0];
+          const sourceDir = path.dirname(sourcePath);
+          const config = JSON.parse(fs.readFileSync(sourcePath, 'utf8'));
+          const workerName = process.env.CF_WORKER_NAME || 'line-harness-reservation';
+          const d1DatabaseName = process.env.CF_D1_DATABASE_NAME || 'line-crm';
+          const r2BucketName = process.env.CF_R2_BUCKET_NAME || 'line-harness-images';
+          const secretsStoreId = process.env.CF_SECRETS_STORE_ID?.trim();
+
+          config.name = workerName;
+          config.topLevelName = workerName;
+          config.account_id = process.env.CF_ACCOUNT_ID;
+          config.main = path.relative(process.cwd(), path.join(sourceDir, config.main)).replaceAll('\\', '/');
+          if (config.assets?.directory) {
+            config.assets.directory = path.relative(
+              process.cwd(),
+              path.join(sourceDir, config.assets.directory),
+            ).replaceAll('\\', '/');
+          }
+          config.d1_databases = [{
+            binding: 'DB',
+            database_name: d1DatabaseName,
+            database_id: process.env.CF_D1_DATABASE_ID,
+          }];
+          config.r2_buckets = [{
+            binding: 'IMAGES',
+            bucket_name: r2BucketName,
+          }];
+          config.triggers = {
+            ...(config.triggers || {}),
+            crons: ['*/5 * * * *'],
+          };
+
+          const plainVars = [
+            'WORKER_URL',
+            'LIFF_URL',
+            'LINE_CHANNEL_ID',
+            'LINE_LOGIN_CHANNEL_ID',
+            'GOOGLE_OAUTH_CLIENT_ID',
+            'GOOGLE_OAUTH_REDIRECT_URI',
+          ].reduce((acc, key) => {
+            const value = process.env[key]?.trim();
+            if (value) acc[key] = value;
+            return acc;
+          }, {});
+          config.vars = {
+            ...(config.vars || {}),
+            ...plainVars,
+          };
+
+          if (secretsStoreId) {
+            const defaultBindings = [
+              'API_KEY',
+              'APP_ENCRYPTION_KEY',
+              'LINE_CHANNEL_ACCESS_TOKEN',
+              'LINE_CHANNEL_SECRET',
+              'LINE_LOGIN_CHANNEL_ID',
+              'LINE_LOGIN_CHANNEL_SECRET',
+              'LIFF_URL',
+              'WORKER_URL',
+              'GOOGLE_OAUTH_CLIENT_ID',
+              'GOOGLE_OAUTH_CLIENT_SECRET',
+              'GOOGLE_OAUTH_REDIRECT_URI',
+              'WEB_URL',
+              'NEXT_PUBLIC_WEB_URL',
+              'DISCORD_RESERVATION_WEBHOOK_URL',
+              'DISCORD_DAILY_WEBHOOK_URL',
+              'DISCORD_REVIEW_WEBHOOK_URL',
+            ];
+            const rawBindings = process.env.CF_SECRETS_STORE_BINDINGS?.trim();
+            const bindingEntries = [
+              ...defaultBindings,
+              ...(rawBindings ? rawBindings.split(',') : []),
+            ];
+            const bindingsByName = new Map();
+            for (const entry of bindingEntries) {
+              const trimmed = entry.trim();
+              if (!trimmed) continue;
+              const [binding, secretName] = trimmed.split('=').map((part) => part.trim());
+              bindingsByName.set(binding, {
+                binding,
+                store_id: secretsStoreId,
+                secret_name: secretName || binding,
+              });
+            }
+            const bindings = Array.from(bindingsByName.values());
+
+            config.secrets_store_secrets = bindings;
+            console.log('Secrets Store bindings:', bindings.map((item) => item.binding).join(', '));
+          }
+
+          const deployConfigPath = path.join(process.cwd(), '.wrangler-ci.json');
+          fs.writeFileSync(deployConfigPath, JSON.stringify(config, null, 2));
+          NODE
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/worker
+          command: deploy --config .wrangler-ci.json

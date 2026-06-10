@@ -1,0 +1,1064 @@
+import type {
+  Friend,
+  Tag,
+  Scenario,
+  ScenarioStep,
+  ApiResponse,
+  PaginatedResponse,
+  User,
+  LineAccount,
+  ConversionPoint,
+  Affiliate,
+  Template,
+  Automation,
+  AutomationLog,
+  Chat,
+  Reminder,
+  ReminderStep,
+  ScoringRule,
+  IncomingWebhook,
+  OutgoingWebhook,
+  NotificationRule,
+  Notification,
+  AccountHealthLog,
+  AccountMigration,
+  StaffMember,
+} from '@line-crm/shared'
+
+import type { Broadcast } from '@line-crm/shared'
+
+/** Broadcast type from API (now camelCase after worker serialization) */
+export type ApiBroadcast = Broadcast
+
+export type BroadcastInsight = {
+  broadcastId?: string
+  delivered: number | null
+  uniqueImpression: number | null
+  uniqueClick: number | null
+  uniqueMediaPlayed: number | null
+  openRate: number | null
+  clickRate: number | null
+  status?: string
+  fetchedAt?: string | null
+}
+
+export type ApiCalendarConnection = {
+  id: string
+  calendarId: string
+  authType: string
+  isActive: boolean
+  createdAt: string
+  updatedAt?: string | null
+}
+
+export type CalendarSyncResult =
+  | { status: 'created'; reservationId: string; bookingId: string; eventId: string }
+  | { status: 'already_synced'; reservationId: string; bookingId: string; eventId: string }
+  | { status: 'skipped'; reservationId: string; reason: string }
+  | { status: 'failed'; reservationId: string; reason: string }
+
+export type CalendarBulkResyncResult = {
+  scannedCount: number
+  resetBookingCount: number
+  deletedEventCount: number
+  deleteFailedCount: number
+  createdCount: number
+  alreadySyncedCount: number
+  skippedCount: number
+  failedCount: number
+}
+
+export type ApiGmailLabel = {
+  id: string
+  name: string
+  type?: string
+}
+
+export type ApiGmailImportRule = {
+  id: string
+  connectionId: string
+  sourceName: 'jalan'
+  name: string
+  fromEmail: string | null
+  query: string | null
+  unprocessedLabelId: string
+  processedLabelId: string
+  reviewLabelId: string
+  failedLabelId: string
+  resourceId: string | null
+  menuId: string | null
+  maxResults: number
+  isActive: boolean
+  lastRunAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type ApiGmailImportRun = {
+  id: string
+  ruleId: string
+  startedAt: string
+  finishedAt: string | null
+  status: 'running' | 'success' | 'partial_failed' | 'failed'
+  fetchedCount: number
+  importedCount: number
+  reviewCount: number
+  failedCount: number
+  lastError: string | null
+}
+
+export type ApiGmailImportRunResult = {
+  runId: string | null
+  ruleId: string
+  dryRun: boolean
+  fetchedCount: number
+  importedCount: number
+  reviewCount: number
+  failedCount: number
+  items: Array<{
+    gmailMessageId: string
+    eventType: string
+    parseStatus: 'imported' | 'duplicate' | 'cancelled' | 'needs_review' | 'failed' | 'dry_run'
+    reservationId?: string | null
+    externalId?: string | null
+    error?: string | null
+  }>
+}
+
+export type CreateGmailImportRuleInput = {
+  connectionId: string
+  name: string
+  fromEmail?: string | null
+  query?: string | null
+  unprocessedLabelId: string
+  processedLabelId: string
+  reviewLabelId: string
+  failedLabelId: string
+  resourceId?: string | null
+  menuId?: string | null
+  maxResults?: number
+  isActive?: boolean
+}
+
+export type ApiUserEvent = {
+  id: string
+  lineAccountId: string | null
+  friendId: string | null
+  lineUserId: string | null
+  eventType: string
+  eventName: string | null
+  eventSource: string
+  subjectType: string | null
+  subjectId: string | null
+  occurredAt: string
+  receivedAt: string
+  sessionId: string | null
+  requestId: string | null
+  idempotencyKey: string | null
+  metadata: string
+  createdAt: string
+}
+
+export type ApiEventDefinition = {
+  id: string
+  eventType: string
+  name: string
+  category: string
+  description: string | null
+  isSystem: boolean
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type ApiEventTagRule = {
+  id: string
+  name: string
+  eventType: string
+  conditions: string
+  action: 'add_tag' | 'remove_tag'
+  tagId: string
+  priority: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type ApiProviderConfig = {
+  id: string
+  name: string
+  displayName: string
+  shortName: string
+  description: string
+  address: string
+  phone: string
+  siteUrl: string
+  colors: {
+    primary: string
+    accent: string
+    background: string
+    text: string
+  }
+  assets: {
+    logoUrl: string
+    heroImageUrl: string
+    faviconUrl: string
+  }
+  reservation: {
+    title: string
+    introTitle: string
+    introBody: string
+    lineLinkTitle: string
+    lineLinkBody: string
+    enableCafeTab: boolean
+    enableLineLinkPanel: boolean
+  }
+  email: {
+    fromName: string
+    footerText: string
+    heroImageUrl: string
+  }
+  externalImport: {
+    enabled: boolean
+    label: string
+    provider: string
+    defaultFromEmail: string
+    defaultQuery: string
+    defaultLabels: {
+      unprocessed: string
+      processed: string
+      review: string
+      failed: string
+    }
+  }
+}
+
+export type ApiExternalCustomer = {
+  id: string
+  source: string
+  externalId: string | null
+  name: string | null
+  phone: string | null
+  email: string | null
+  metadata: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export type ApiExternalCustomerLink = {
+  id: string
+  friendId: string
+  externalCustomerId: string
+  linkMethod: 'manual' | 'phone' | 'email' | 'import'
+  confidence: number
+  createdAt: string
+  customer: ApiExternalCustomer
+}
+
+export type ApiAccountSettingDefinition = {
+  key: string
+  label: string
+  category: 'discord' | 'email' | 'provider' | 'system'
+  secret: boolean
+  description: string
+}
+
+export type ApiAccountSetting = ApiAccountSettingDefinition & {
+  value: string
+  configured: boolean
+  encrypted: boolean
+}
+
+export type ScenarioStepInput = {
+  stepOrder: number
+  delayMinutes?: number
+  messageType: ScenarioStep['messageType']
+  messageContent: string
+  conditionType?: string | null
+  conditionValue?: string | null
+  nextStepOnFalse?: number | null
+}
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/+$/, '')
+if (!API_URL) {
+  throw new Error(
+    'NEXT_PUBLIC_API_URL is not set. Build cannot proceed without a valid API URL. ' +
+    'Set it in .env.production (local) or GitHub Secrets (CI).'
+  )
+}
+
+/**
+ * Read the API key from localStorage (set during login).
+ * Never embed secrets in the client bundle via NEXT_PUBLIC_* env vars.
+ */
+function getApiKey(): string {
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem('lh_api_key')?.trim() || ''
+  }
+  return ''
+}
+
+export type RichMenuBounds = { x: number; y: number; width: number; height: number }
+export type RichMenuAction =
+  | { type: 'postback'; data: string; displayText?: string; label?: string }
+  | { type: 'message'; text: string; label?: string }
+  | { type: 'uri'; uri: string; label?: string }
+  | { type: 'richmenuswitch'; richMenuAliasId: string; data: string; label?: string }
+export type RichMenuArea = { bounds: RichMenuBounds; action: RichMenuAction }
+export type RichMenu = {
+  richMenuId: string
+  size: { width: number; height: number }
+  selected: boolean
+  name: string
+  chatBarText: string
+  areas: RichMenuArea[]
+}
+export type CreateRichMenuInput = {
+  size: { width: number; height: number }
+  selected: boolean
+  name: string
+  chatBarText: string
+  areas: RichMenuArea[]
+}
+
+export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${getApiKey()}`,
+      ...options?.headers,
+    },
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    if (text) {
+      let detail: unknown
+      try {
+        const body = JSON.parse(text) as { error?: unknown; message?: unknown; code?: unknown }
+        detail = body.error || body.message || body.code
+      } catch {
+        detail = text
+      }
+      throw new Error(String(detail || text))
+    }
+    throw new Error(`API error: ${res.status}`)
+  }
+  return res.json() as Promise<T>
+}
+
+export type FriendListParams = {
+  offset?: string
+  limit?: string | number
+  tagId?: string
+  accountId?: string
+  search?: string
+  recentDays?: string | number
+  activeSince?: string
+}
+
+export type FriendWithTags = Friend & { tags: Tag[] }
+
+export const api = {
+  providerConfig: {
+    get: () => fetchApi<ApiResponse<ApiProviderConfig>>('/api/public/provider-config'),
+  },
+  externalCustomers: {
+    search: (params?: { query?: string; source?: string; limit?: number }) => {
+      const query = new URLSearchParams()
+      if (params?.query) query.set('q', params.query)
+      if (params?.source) query.set('source', params.source)
+      if (params?.limit) query.set('limit', String(params.limit))
+      const suffix = query.toString() ? `?${query}` : ''
+      return fetchApi<ApiResponse<ApiExternalCustomer[]>>(`/api/external-customers${suffix}`)
+    },
+    create: (data: {
+      source: string
+      externalId?: string | null
+      name?: string | null
+      phone?: string | null
+      email?: string | null
+      metadata?: Record<string, unknown> | string | null
+    }) =>
+      fetchApi<ApiResponse<ApiExternalCustomer>>('/api/external-customers', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    links: (friendId: string) =>
+      fetchApi<ApiResponse<ApiExternalCustomerLink[]>>(`/api/friends/${friendId}/external-customers`),
+    link: (friendId: string, data: { externalCustomerId: string; linkMethod?: ApiExternalCustomerLink['linkMethod']; confidence?: number }) =>
+      fetchApi<ApiResponse<ApiExternalCustomerLink>>(`/api/friends/${friendId}/external-customers`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    unlink: (friendId: string, externalCustomerId: string) =>
+      fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/external-customers/${externalCustomerId}`, {
+        method: 'DELETE',
+      }),
+  },
+  forms: {
+    list: () =>
+      fetchApi<ApiResponse<Array<{
+        id: string
+        name: string
+        description: string | null
+        fields: unknown[]
+        onSubmitTagId: string | null
+        saveToMetadata: boolean
+        isActive: boolean
+        submitCount: number
+        createdAt: string
+        updatedAt: string
+      }>>>('/api/forms'),
+    create: (data: {
+      name: string
+      description?: string | null
+      fields?: unknown[]
+      onSubmitTagId?: string | null
+      saveToMetadata?: boolean
+    }) =>
+      fetchApi<ApiResponse<{
+        id: string
+        name: string
+        description: string | null
+        fields: unknown[]
+        onSubmitTagId: string | null
+        saveToMetadata: boolean
+        isActive: boolean
+        submitCount: number
+        createdAt: string
+        updatedAt: string
+      }>>('/api/forms', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
+  friends: {
+    list: (params?: FriendListParams) => {
+      const query: Record<string, string> = {}
+      if (params?.offset) query.offset = String(params.offset)
+      if (params?.limit) query.limit = String(params.limit)
+      if (params?.tagId) query.tagId = params.tagId
+      if (params?.accountId) query.lineAccountId = params.accountId
+      if (params?.search) query.search = params.search
+      if (params?.recentDays) query.recentDays = String(params.recentDays)
+      if (params?.activeSince) query.activeSince = params.activeSince
+      return fetchApi<ApiResponse<PaginatedResponse<FriendWithTags>>>(
+        '/api/friends?' + new URLSearchParams(query)
+      )
+    },
+    get: (id: string) =>
+      fetchApi<ApiResponse<FriendWithTags>>(`/api/friends/${id}`),
+    count: (params?: { accountId?: string }) => {
+      const query = params?.accountId ? '?lineAccountId=' + params.accountId : ''
+      return fetchApi<ApiResponse<{ count: number }>>('/api/friends/count' + query)
+    },
+    addTag: (friendId: string, tagId: string) =>
+      fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/tags`, {
+        method: 'POST',
+        body: JSON.stringify({ tagId }),
+      }),
+    removeTag: (friendId: string, tagId: string) =>
+      fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/tags/${tagId}`, {
+        method: 'DELETE',
+      }),
+  },
+  tags: {
+    list: () =>
+      fetchApi<ApiResponse<Tag[]>>('/api/tags'),
+    create: (data: { name: string; color: string; category?: string | null; description?: string | null }) =>
+      fetchApi<ApiResponse<Tag>>('/api/tags', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/tags/${id}`, { method: 'DELETE' }),
+  },
+  events: {
+    list: (params?: { friendId?: string; lineAccountId?: string; eventType?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }) => {
+      const query = new URLSearchParams()
+      if (params?.friendId) query.set('friendId', params.friendId)
+      if (params?.lineAccountId) query.set('lineAccountId', params.lineAccountId)
+      if (params?.eventType) query.set('eventType', params.eventType)
+      if (params?.dateFrom) query.set('dateFrom', params.dateFrom)
+      if (params?.dateTo) query.set('dateTo', params.dateTo)
+      if (params?.limit) query.set('limit', String(params.limit))
+      if (params?.offset) query.set('offset', String(params.offset))
+      const suffix = query.toString() ? `?${query}` : ''
+      return fetchApi<ApiResponse<ApiUserEvent[]>>('/api/events' + suffix)
+    },
+    definitions: () =>
+      fetchApi<ApiResponse<ApiEventDefinition[]>>('/api/event-definitions'),
+    rules: () =>
+      fetchApi<ApiResponse<ApiEventTagRule[]>>('/api/event-tag-rules'),
+    createRule: (data: { name: string; eventType: string; conditions?: Record<string, unknown> | string | null; action: 'add_tag' | 'remove_tag'; tagId: string; priority?: number; isActive?: boolean }) =>
+      fetchApi<ApiResponse<ApiEventTagRule>>('/api/event-tag-rules', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    deleteRule: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/event-tag-rules/${id}`, { method: 'DELETE' }),
+  },
+  scenarios: {
+    list: (params?: { accountId?: string }) => {
+      const query = params?.accountId ? '?lineAccountId=' + params.accountId : ''
+      return fetchApi<ApiResponse<(Scenario & { stepCount?: number })[]>>('/api/scenarios' + query)
+    },
+    get: (id: string) =>
+      fetchApi<ApiResponse<Scenario & { steps: ScenarioStep[] }>>(`/api/scenarios/${id}`),
+    create: (data: Omit<Scenario, 'id' | 'createdAt' | 'updatedAt'> & { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<Scenario>>('/api/scenarios', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: Partial<Omit<Scenario, 'id' | 'createdAt' | 'updatedAt'>>) =>
+      fetchApi<ApiResponse<Scenario>>(`/api/scenarios/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/scenarios/${id}`, { method: 'DELETE' }),
+    addStep: (id: string, data: ScenarioStepInput) =>
+      fetchApi<ApiResponse<ScenarioStep>>(`/api/scenarios/${id}/steps`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    updateStep: (
+      id: string,
+      stepId: string,
+      data: Partial<ScenarioStepInput>
+    ) =>
+      fetchApi<ApiResponse<ScenarioStep>>(`/api/scenarios/${id}/steps/${stepId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    deleteStep: (id: string, stepId: string) =>
+      fetchApi<ApiResponse<null>>(`/api/scenarios/${id}/steps/${stepId}`, {
+        method: 'DELETE',
+      }),
+  },
+  broadcasts: {
+    list: (params?: { accountId?: string }) => {
+      const query = params?.accountId ? '?lineAccountId=' + params.accountId : ''
+      return fetchApi<ApiResponse<ApiBroadcast[]>>('/api/broadcasts' + query)
+    },
+    get: (id: string) =>
+      fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}`),
+    create: (data: {
+      title: string
+      messageType: ApiBroadcast['messageType']
+      messageContent: string
+      targetType: ApiBroadcast['targetType']
+      targetTagId?: string | null
+      scheduledAt?: string | null
+      status?: ApiBroadcast['status']
+      lineAccountId?: string | null
+    }) =>
+      fetchApi<ApiResponse<ApiBroadcast>>('/api/broadcasts', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (
+      id: string,
+      data: {
+        title?: string
+        messageType?: ApiBroadcast['messageType']
+        messageContent?: string
+        targetType?: ApiBroadcast['targetType']
+        targetTagId?: string | null
+        scheduledAt?: string | null
+      }
+    ) =>
+      fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/broadcasts/${id}`, { method: 'DELETE' }),
+    send: (id: string) =>
+      fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}/send`, { method: 'POST' }),
+    getInsight: (id: string) =>
+      fetchApi<ApiResponse<BroadcastInsight | null>>(`/api/broadcasts/${id}/insight`),
+    fetchInsight: (id: string) =>
+      fetchApi<ApiResponse<BroadcastInsight>>(`/api/broadcasts/${id}/fetch-insight`, { method: 'POST' }),
+    testSend: (id: string) =>
+      fetchApi<{ success: boolean; sent?: number; failed?: number; error?: string }>(`/api/broadcasts/${id}/test-send`, { method: 'POST' }),
+    getProgress: (id: string) =>
+      fetchApi<{ success: boolean; data?: { status: string; totalCount: number; successCount: number; batchOffset: number } }>(`/api/broadcasts/${id}/progress`),
+    sendSegment: (id: string, conditions: unknown) =>
+      fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}/send-segment`, {
+        method: 'POST',
+        body: JSON.stringify({ conditions }),
+      }),
+  },
+
+  calendar: {
+    listConnections: () =>
+      fetchApi<ApiResponse<ApiCalendarConnection[]>>('/api/integrations/google-calendar'),
+    oauthUrl: (params: { calendarId?: string; returnTo?: string }) =>
+      fetchApi<ApiResponse<{ url: string }>>(
+        '/api/reservations/google-calendar/oauth-url?' + new URLSearchParams({
+          calendarId: params.calendarId || 'primary',
+          ...(params.returnTo ? { returnTo: params.returnTo } : {}),
+        }),
+      ),
+    deleteConnection: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/integrations/google-calendar/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    syncReservation: (reservationId: string, options?: { force?: boolean }) =>
+      fetchApi<ApiResponse<{ reservation: unknown; sync: CalendarSyncResult }>>(
+        `/api/reservations/${encodeURIComponent(reservationId)}/google-calendar/sync`,
+        {
+          method: 'POST',
+          ...(options?.force ? { body: JSON.stringify({ force: true }) } : {}),
+        },
+      ),
+    resyncReservations: (data: {
+      dateFrom: string
+      dateTo: string
+      resourceId?: string | null
+      sources?: Array<'line' | 'jalan' | 'web'>
+      limit?: number
+    }) =>
+      fetchApi<ApiResponse<CalendarBulkResyncResult>>('/api/reservations/google-calendar/resync', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
+
+  gmailImports: {
+    labels: (connectionId: string) =>
+      fetchApi<ApiResponse<ApiGmailLabel[]>>(
+        '/api/integrations/gmail/labels?' + new URLSearchParams({ connectionId }),
+      ),
+    listRules: () =>
+      fetchApi<ApiResponse<ApiGmailImportRule[]>>('/api/integrations/gmail/import-rules'),
+    createRule: (data: CreateGmailImportRuleInput) =>
+      fetchApi<ApiResponse<ApiGmailImportRule>>('/api/integrations/gmail/import-rules', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    deleteRule: (id: string) =>
+      fetchApi<ApiResponse<ApiGmailImportRule>>(`/api/integrations/gmail/import-rules/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    listRuns: (params?: { ruleId?: string; limit?: number }) => {
+      const query = new URLSearchParams()
+      if (params?.ruleId) query.set('ruleId', params.ruleId)
+      if (params?.limit) query.set('limit', String(params.limit))
+      const suffix = query.toString() ? `?${query}` : ''
+      return fetchApi<ApiResponse<ApiGmailImportRun[]>>(`/api/integrations/gmail/import-runs${suffix}`)
+    },
+    runRule: (id: string, data?: { dryRun?: boolean; maxResults?: number }) =>
+      fetchApi<ApiResponse<ApiGmailImportRunResult>>(
+        `/api/integrations/gmail/import-rules/${encodeURIComponent(id)}/run`,
+        {
+          method: 'POST',
+          body: JSON.stringify(data ?? {}),
+        },
+      ),
+  },
+
+  segments: {
+    count: (conditions: unknown, accountId?: string) =>
+      fetchApi<{ success: boolean; count?: number; error?: string }>('/api/segments/count', {
+        method: 'POST',
+        body: JSON.stringify({ conditions, accountId }),
+      }),
+  },
+
+  accountSettings: {
+    getTestRecipients: (accountId: string) =>
+      fetchApi<{ success: boolean; data: Array<{ id: string; displayName: string; pictureUrl: string | null }> }>(`/api/account-settings/test-recipients?accountId=${accountId}`),
+    updateTestRecipients: (accountId: string, friendIds: string[]) =>
+      fetchApi<{ success: boolean }>('/api/account-settings/test-recipients', {
+        method: 'PUT',
+        body: JSON.stringify({ accountId, friendIds }),
+      }),
+    definitions: () =>
+      fetchApi<ApiResponse<ApiAccountSettingDefinition[]>>('/api/account-settings/definitions'),
+    getConfig: (params?: { accountId?: string | null; category?: ApiAccountSettingDefinition['category'] }) => {
+      const query = new URLSearchParams()
+      if (params?.accountId) query.set('accountId', params.accountId)
+      if (params?.category) query.set('category', params.category)
+      const suffix = query.toString() ? `?${query}` : ''
+      return fetchApi<ApiResponse<ApiAccountSetting[]>>(`/api/account-settings/config${suffix}`)
+    },
+    updateConfig: (data: { accountId?: string | null; values: Record<string, string | null | undefined> }) =>
+      fetchApi<ApiResponse<{ accountId: string; updated: Array<{ key: string; configured: boolean; encrypted: boolean }> }>>('/api/account-settings/config', {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+  },
+
+  // ── Round 2 APIs ─────────────────────────────────────────────────────────
+  users: {
+    list: () =>
+      fetchApi<ApiResponse<User[]>>('/api/users'),
+    get: (id: string) =>
+      fetchApi<ApiResponse<User>>(`/api/users/${id}`),
+    create: (data: { email?: string | null; phone?: string | null; externalId?: string | null; displayName?: string | null }) =>
+      fetchApi<ApiResponse<User>>('/api/users', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: Partial<Pick<User, 'email' | 'phone' | 'externalId' | 'displayName'>>) =>
+      fetchApi<ApiResponse<User>>(`/api/users/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/users/${id}`, { method: 'DELETE' }),
+    link: (userId: string, friendId: string) =>
+      fetchApi<ApiResponse<null>>(`/api/users/${userId}/link`, {
+        method: 'POST',
+        body: JSON.stringify({ friendId }),
+      }),
+    accounts: (userId: string) =>
+      fetchApi<ApiResponse<{ id: string; lineUserId: string; displayName: string | null; isFollowing: boolean }[]>>(
+        `/api/users/${userId}/accounts`,
+      ),
+  },
+  lineAccounts: {
+    list: () =>
+      fetchApi<ApiResponse<LineAccount[]>>('/api/line-accounts'),
+    get: (id: string) =>
+      fetchApi<ApiResponse<LineAccount>>(`/api/line-accounts/${id}`),
+    create: (data: { channelId: string; name: string; channelAccessToken: string; channelSecret: string }) =>
+      fetchApi<ApiResponse<LineAccount>>('/api/line-accounts', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: Partial<Pick<LineAccount, 'name' | 'channelAccessToken' | 'channelSecret' | 'isActive'>>) =>
+      fetchApi<ApiResponse<LineAccount>>(`/api/line-accounts/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/line-accounts/${id}`, { method: 'DELETE' }),
+    syncFollowers: (id: string, params?: { start?: string; limit?: number }) => {
+      const query = new URLSearchParams()
+      if (params?.start) query.set('start', params.start)
+      if (params?.limit) query.set('limit', String(params.limit))
+      const qs = query.toString()
+      return fetchApi<ApiResponse<{ processed: number; created: number; updated: number; failed: number; next: string | null; done: boolean }>>(
+        `/api/line-accounts/${id}/sync-followers${qs ? `?${qs}` : ''}`,
+        { method: 'POST' },
+      )
+    },
+  },
+  conversions: {
+    points: () =>
+      fetchApi<ApiResponse<ConversionPoint[]>>('/api/conversions/points'),
+    createPoint: (data: { name: string; eventType: string; value?: number | null }) =>
+      fetchApi<ApiResponse<ConversionPoint>>('/api/conversions/points', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    deletePoint: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/conversions/points/${id}`, { method: 'DELETE' }),
+    track: (data: { conversionPointId: string; friendId: string; userId?: string | null; affiliateCode?: string | null; metadata?: Record<string, unknown> | null }) =>
+      fetchApi<ApiResponse<unknown>>('/api/conversions/track', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    report: (params?: { startDate?: string; endDate?: string }) =>
+      fetchApi<ApiResponse<{ conversionPointId: string; conversionPointName: string; eventType: string; totalCount: number; totalValue: number }[]>>(
+        '/api/conversions/report?' + new URLSearchParams(params as Record<string, string>),
+      ),
+  },
+  affiliates: {
+    list: () =>
+      fetchApi<ApiResponse<Affiliate[]>>('/api/affiliates'),
+    get: (id: string) =>
+      fetchApi<ApiResponse<Affiliate>>(`/api/affiliates/${id}`),
+    create: (data: { name: string; code: string; commissionRate?: number }) =>
+      fetchApi<ApiResponse<Affiliate>>('/api/affiliates', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: Partial<Pick<Affiliate, 'name' | 'commissionRate' | 'isActive'>>) =>
+      fetchApi<ApiResponse<Affiliate>>(`/api/affiliates/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/affiliates/${id}`, { method: 'DELETE' }),
+    report: (id: string, params?: { startDate?: string; endDate?: string }) =>
+      fetchApi<ApiResponse<{ affiliateId: string; affiliateName: string; code: string; commissionRate: number; totalClicks: number; totalConversions: number; totalRevenue: number }>>(
+        `/api/affiliates/${id}/report?` + new URLSearchParams(params as Record<string, string>),
+      ),
+  },
+  templates: {
+    list: (category?: string) =>
+      fetchApi<ApiResponse<{ id: string; name: string; category: string; messageType: string; messageContent: string; createdAt: string; updatedAt: string }[]>>(
+        '/api/templates' + (category ? '?' + new URLSearchParams({ category }) : ''),
+      ),
+    get: (id: string) =>
+      fetchApi<ApiResponse<{ id: string; name: string; category: string; messageType: string; messageContent: string; createdAt: string; updatedAt: string }>>(
+        `/api/templates/${id}`,
+      ),
+    create: (data: { name: string; category: string; messageType: string; messageContent: string }) =>
+      fetchApi<ApiResponse<{ id: string; name: string; category: string; messageType: string; messageContent: string; createdAt: string; updatedAt: string }>>(
+        '/api/templates',
+        { method: 'POST', body: JSON.stringify(data) },
+      ),
+    update: (id: string, data: Partial<{ name: string; category: string; messageType: string; messageContent: string }>) =>
+      fetchApi<ApiResponse<{ id: string; name: string; category: string; messageType: string; messageContent: string; createdAt: string; updatedAt: string }>>(
+        `/api/templates/${id}`,
+        { method: 'PUT', body: JSON.stringify(data) },
+      ),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/templates/${id}`, { method: 'DELETE' }),
+  },
+  automations: {
+    list: (params?: { accountId?: string }) => {
+      const query = params?.accountId ? '?lineAccountId=' + params.accountId : ''
+      return fetchApi<ApiResponse<Automation[]>>('/api/automations' + query)
+    },
+    get: (id: string) =>
+      fetchApi<ApiResponse<Automation & { logs?: AutomationLog[] }>>(`/api/automations/${id}`),
+    create: (data: {
+      name: string
+      eventType: Automation['eventType']
+      actions: Automation['actions']
+      description?: string | null
+      conditions?: Record<string, unknown>
+      priority?: number
+    }) =>
+      fetchApi<ApiResponse<Automation>>('/api/automations', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: Partial<Pick<Automation, 'name' | 'description' | 'eventType' | 'conditions' | 'actions' | 'isActive' | 'priority'>>) =>
+      fetchApi<ApiResponse<Automation>>(`/api/automations/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/automations/${id}`, { method: 'DELETE' }),
+    logs: (id: string, limit?: number) =>
+      fetchApi<ApiResponse<AutomationLog[]>>(
+        `/api/automations/${id}/logs` + (limit ? `?limit=${limit}` : ''),
+      ),
+  },
+  chats: {
+    list: (params?: { status?: string; operatorId?: string; accountId?: string; recentDays?: string | number; since?: string }) => {
+      const query: Record<string, string> = {}
+      if (params?.status) query.status = params.status
+      if (params?.operatorId) query.operatorId = params.operatorId
+      if (params?.accountId) query.lineAccountId = params.accountId
+      if (params?.recentDays) query.recentDays = String(params.recentDays)
+      if (params?.since) query.since = params.since
+      return fetchApi<ApiResponse<Chat[]>>(
+        '/api/chats?' + new URLSearchParams(query),
+      )
+    },
+    get: (id: string, params?: { recentDays?: string | number; since?: string }) => {
+      const query = new URLSearchParams()
+      if (params?.recentDays) query.set('recentDays', String(params.recentDays))
+      if (params?.since) query.set('since', params.since)
+      const suffix = query.toString() ? `?${query}` : ''
+      return fetchApi<ApiResponse<Chat & { messages?: { id: string; content: string; senderType: string; createdAt: string }[] }>>(
+        `/api/chats/${id}${suffix}`,
+      )
+    },
+    create: (data: { friendId: string; operatorId?: string | null }) =>
+      fetchApi<ApiResponse<Chat>>('/api/chats', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: { operatorId?: string | null; status?: Chat['status']; notes?: string | null }) =>
+      fetchApi<ApiResponse<Chat>>(`/api/chats/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    send: (id: string, data: { content: string; messageType?: string }) =>
+      fetchApi<ApiResponse<unknown>>(`/api/chats/${id}/send`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
+  richMenus: {
+    list: (params?: { accountId?: string }) => {
+      const query = params?.accountId ? '?' + new URLSearchParams({ accountId: params.accountId }) : ''
+      return fetchApi<ApiResponse<RichMenu[]>>('/api/rich-menus' + query)
+    },
+    create: (data: CreateRichMenuInput, params?: { accountId?: string }) => {
+      const query = params?.accountId ? '?' + new URLSearchParams({ accountId: params.accountId }) : ''
+      return fetchApi<ApiResponse<{ richMenuId: string }>>('/api/rich-menus' + query, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+    },
+    uploadImage: (richMenuId: string, data: { image: string; contentType: 'image/png' | 'image/jpeg' }, params?: { accountId?: string }) => {
+      const query = params?.accountId ? '?' + new URLSearchParams({ accountId: params.accountId }) : ''
+      return fetchApi<ApiResponse<null>>(`/api/rich-menus/${encodeURIComponent(richMenuId)}/image${query}`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+    },
+    setDefault: (richMenuId: string, params?: { accountId?: string }) => {
+      const query = params?.accountId ? '?' + new URLSearchParams({ accountId: params.accountId }) : ''
+      return fetchApi<ApiResponse<null>>(`/api/rich-menus/${encodeURIComponent(richMenuId)}/default${query}`, { method: 'POST' })
+    },
+    delete: (richMenuId: string, params?: { accountId?: string }) => {
+      const query = params?.accountId ? '?' + new URLSearchParams({ accountId: params.accountId }) : ''
+      return fetchApi<ApiResponse<null>>(`/api/rich-menus/${encodeURIComponent(richMenuId)}${query}`, { method: 'DELETE' })
+    },
+  },
+  reminders: {
+    list: (params?: { accountId?: string }) => {
+      const query = params?.accountId ? '?lineAccountId=' + params.accountId : ''
+      return fetchApi<ApiResponse<Reminder[]>>('/api/reminders' + query)
+    },
+    get: (id: string) =>
+      fetchApi<ApiResponse<Reminder & { steps: ReminderStep[] }>>(`/api/reminders/${id}`),
+    create: (data: { name: string; description?: string | null; lineAccountId?: string | null }) =>
+      fetchApi<ApiResponse<Reminder>>('/api/reminders', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: Partial<Pick<Reminder, 'name' | 'description' | 'isActive'>>) =>
+      fetchApi<ApiResponse<Reminder>>(`/api/reminders/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/reminders/${id}`, { method: 'DELETE' }),
+    addStep: (id: string, data: { offsetMinutes: number; messageType: string; messageContent: string }) =>
+      fetchApi<ApiResponse<ReminderStep>>(`/api/reminders/${id}/steps`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    updateStep: (reminderId: string, stepId: string, data: Partial<{ offsetMinutes: number; messageType: string; messageContent: string }>) =>
+      fetchApi<ApiResponse<ReminderStep>>(`/api/reminders/${reminderId}/steps/${stepId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    deleteStep: (reminderId: string, stepId: string) =>
+      fetchApi<ApiResponse<null>>(`/api/reminders/${reminderId}/steps/${stepId}`, {
+        method: 'DELETE',
+      }),
+  },
+  scoring: {
+    rules: () =>
+      fetchApi<ApiResponse<ScoringRule[]>>('/api/scoring-rules'),
+    getRule: (id: string) =>
+      fetchApi<ApiResponse<ScoringRule>>(`/api/scoring-rules/${id}`),
+    createRule: (data: { name: string; eventType: string; scoreValue: number }) =>
+      fetchApi<ApiResponse<ScoringRule>>('/api/scoring-rules', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    updateRule: (id: string, data: Partial<Pick<ScoringRule, 'name' | 'eventType' | 'scoreValue' | 'isActive'>>) =>
+      fetchApi<ApiResponse<ScoringRule>>(`/api/scoring-rules/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    deleteRule: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/scoring-rules/${id}`, { method: 'DELETE' }),
+    friendScore: (friendId: string) =>
+      fetchApi<ApiResponse<{ totalScore: number; history: { id: string; scoreChange: number; reason: string | null; createdAt: string }[] }>>(
+        `/api/friends/${friendId}/score`,
+      ),
+  },
+  webhooks: {
+    incoming: {
+      list: () =>
+        fetchApi<ApiResponse<IncomingWebhook[]>>('/api/webhooks/incoming'),
+      create: (data: { name: string; sourceType?: string; secret?: string | null }) =>
+        fetchApi<ApiResponse<IncomingWebhook>>('/api/webhooks/incoming', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      update: (id: string, data: Partial<Pick<IncomingWebhook, 'name' | 'sourceType' | 'isActive'>>) =>
+        fetchApi<ApiResponse<IncomingWebhook>>(`/api/webhooks/incoming/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        }),
+      delete: (id: string) =>
+        fetchApi<ApiResponse<null>>(`/api/webhooks/incoming/${id}`, { method: 'DELETE' }),
+    },
+    outgoing: {
+      list: () =>
+        fetchApi<ApiResponse<OutgoingWebhook[]>>('/api/webhooks/outgoing'),
+      create: (data: { name: string; url: string; eventTypes: string[]; secret?: string | null }) =>
+        fetchApi<ApiResponse<OutgoingWebhook>>('/api/webhooks/outgoing', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      update: (id: string, data: Partial<Pick<OutgoingWebhook, 'name' | 'url' | 'eventTypes' | 'isActive'>>) =>
+        fetchApi<ApiResponse<OutgoingWebhook>>(`/api/webhooks/outgoing/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        }),
+      delete: (id: string) =>
+        fetchApi<ApiResponse<null>>(`/api/webhooks/outgoing/${id}`, { method: 'DELETE' }),
+    },
+  },
+  notifications: {
+    rules: {
+      list: () =>
+        fetchApi<ApiResponse<NotificationRule[]>>('/api/notifications/rules'),
+      get: (id: string) =>
+        fetchApi<ApiResponse<NotificationRule>>(`/api/notifications/rules/${id}`),
+      create: (data: { name: string; eventType: string; conditions?: Record<string, unknown>; channels?: string[] }) =>
+        fetchApi<ApiResponse<NotificationRule>>('/api/notifications/rules', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      update: (id: string, data: Partial<Pick<NotificationRule, 'name' | 'eventType' | 'conditions' | 'channels' | 'isActive'>>) =>
+        fetchApi<ApiResponse<NotificationRule>>(`/api/notifications/rules/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        }),
+      delete: (id: string) =>
+        fetchApi<ApiResponse<null>>(`/api/notifications/rules/${id}`, { method: 'DELETE' }),
+    },
+    list: (params?: { status?: string; limit?: string }) =>
+      fetchApi<ApiResponse<Notification[]>>(
+        '/api/notifications?' + new URLSearchParams(params as Record<string, string>),
+      ),
+  },
+  health: {
+    accounts: () =>
+      fetchApi<ApiResponse<LineAccount[]>>('/api/line-accounts'),
+    getHealth: (accountId: string) =>
+      fetchApi<ApiResponse<{ riskLevel: string; logs: AccountHealthLog[] }>>(
+        `/api/accounts/${accountId}/health`,
+      ),
+    migrations: () =>
+      fetchApi<ApiResponse<AccountMigration[]>>('/api/accounts/migrations'),
+    migrate: (fromAccountId: string, data: { toAccountId: string }) =>
+      fetchApi<ApiResponse<AccountMigration>>(`/api/accounts/${fromAccountId}/migrate`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    getMigration: (migrationId: string) =>
+      fetchApi<ApiResponse<AccountMigration>>(`/api/accounts/migrations/${migrationId}`),
+  },
+  staff: {
+    list: () =>
+      fetchApi<ApiResponse<StaffMember[]>>('/api/staff'),
+    get: (id: string) =>
+      fetchApi<ApiResponse<StaffMember>>(`/api/staff/${id}`),
+    me: () =>
+      fetchApi<ApiResponse<{ id: string; name: string; role: string; email: string | null }>>('/api/staff/me'),
+    create: (data: { name: string; email?: string; role: 'admin' | 'staff' }) =>
+      fetchApi<ApiResponse<StaffMember>>('/api/staff', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: { name?: string; email?: string | null; role?: string; isActive?: boolean }) =>
+      fetchApi<ApiResponse<StaffMember>>(`/api/staff/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/staff/${id}`, { method: 'DELETE' }),
+    regenerateKey: (id: string) =>
+      fetchApi<ApiResponse<{ apiKey: string }>>(`/api/staff/${id}/regenerate-key`, { method: 'POST' }),
+  },
+}
