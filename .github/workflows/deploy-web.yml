@@ -15,8 +15,15 @@ name: Deploy Web
 # Cloudflare Pages project must already exist.
 # This workflow only deploys the static export and does not create/update
 # project-level settings.
+
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'GitHub Environment to deploy'
+        required: true
+        type: string
+        default: production
   push:
     branches: [main]
     paths:
@@ -33,7 +40,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
     steps:
       - uses: actions/checkout@v4
 

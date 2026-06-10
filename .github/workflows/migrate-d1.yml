@@ -8,9 +8,15 @@ name: Migrate D1
 # - CLOUDFLARE_ACCOUNT_ID        can be a Secret or Variable
 # - CLOUDFLARE_D1_DATABASE_NAME   default: line-crm
 
+
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'GitHub Environment to migrate'
+        required: true
+        type: string
+        default: production
       migration_file:
         description: SQL file under packages/db/migrations to execute
         required: true
@@ -18,7 +24,6 @@ on:
       database_name:
         description: Remote D1 database name
         required: false
-        default: line-crm
       confirm_remote:
         description: I understand this executes against the remote D1 database
         required: true
@@ -29,13 +34,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: d1-migration-production
+  group: d1-migration-${{ inputs.environment || 'production' }}
   cancel-in-progress: false
 
 jobs:
   migrate:
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ inputs.environment || 'production' }}
     steps:
       - uses: actions/checkout@v4
 
