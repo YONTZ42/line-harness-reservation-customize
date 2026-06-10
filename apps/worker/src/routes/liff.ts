@@ -667,7 +667,7 @@ liffRoutes.get('/auth/callback', async (c) => {
     try {
       const { getScenarios, enrollFriendInScenario: enroll, getScenarioSteps } = await import('@line-crm/db');
       const { LineClient } = await import('@line-crm/line-sdk');
-      const { buildMessage, expandVariables } = await import('../services/step-delivery.js');
+      const { buildMessages, expandVariables } = await import('../services/step-delivery.js');
 
       // Resolve which account this friend belongs to
       const matchedAccountId = accountParam
@@ -699,7 +699,7 @@ liffRoutes.get('/auth/callback', async (c) => {
                 { ...friend, metadata: resolvedMetaLiff } as Parameters<typeof expandVariables>[1],
                 await workerBaseUrl(c.env, c.req.url),
               );
-              await lineClient.pushMessage(lineUserId, [buildMessage(firstStep.message_type, expandedContent)]);
+              await lineClient.pushMessage(lineUserId, buildMessages(firstStep.message_type, expandedContent));
             }
           }
         }

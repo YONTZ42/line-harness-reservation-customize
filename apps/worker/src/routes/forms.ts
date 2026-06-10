@@ -484,7 +484,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
             if (account) accessToken = account.channel_access_token;
           }
           const lineClient = new LineClient(accessToken);
-          const { buildMessage, expandVariables } = await import('../services/step-delivery.js');
+          const { buildMessage, buildMessages, expandVariables } = await import('../services/step-delivery.js');
           const apiOrigin = new URL(c.req.url).origin;
           const { resolveMetadata } = await import('../services/step-delivery.js');
           const resolvedMeta = await resolveMetadata(c.env.DB, { user_id: (friend as unknown as Record<string, string | null>).user_id, metadata: (friend as unknown as Record<string, string | null>).metadata });
@@ -543,13 +543,13 @@ forms.post('/api/forms/:id/submit', async (c) => {
           } else if (form.on_submit_message_type && form.on_submit_message_content) {
             // Custom form message replaces default diagnostic result
             const expanded = expandVariables(form.on_submit_message_content, friendData, apiOrigin);
-            messages.push(buildMessage(form.on_submit_message_type, expanded));
+            messages.push(...buildMessages(form.on_submit_message_type, expanded));
           } else {
             // Default: send diagnostic result Flex
             messages.push(buildMessage('flex', JSON.stringify(resultFlex)));
           }
 
-          await lineClient.pushMessage(friend.line_user_id, messages);
+          await lineClient.pushMessage(friend.line_user_id, messages.slice(0, 5));
         })(),
       );
 

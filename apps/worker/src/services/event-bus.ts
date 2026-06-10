@@ -1,5 +1,3 @@
-import { extractFlexAltText } from '../utils/flex-alt-text.js';
-
 /**
  * イベントバス — システム内イベントの発火と処理
  *
@@ -24,8 +22,8 @@ import {
   getFriendScore,
 } from '@line-crm/db';
 import { LineClient } from '@line-crm/line-sdk';
-import type { Message } from '@line-crm/line-sdk';
 import { sendAdConversions } from './ad-conversion.js';
+import { buildMessages } from './message-builder.js';
 
 export interface EventPayload {
   friendId?: string;
@@ -284,13 +282,7 @@ async function executeAction(
       if (!friend) break;
       const lineClient = new LineClient(lineAccessToken);
       const msgType = action.params.messageType || 'text';
-      let msg: Message;
-      if (msgType === 'flex') {
-        const contents = normalizeFlexContents(JSON.parse(action.params.content));
-        msg = { type: 'flex', altText: action.params.altText || extractFlexAltText(contents), contents };
-      } else {
-        msg = { type: 'text', text: action.params.content };
-      }
+      const messages = buildMessages(msgType, action.params.content, action.params.altText);
       let deliveryType: 'reply' | 'push' = 'push';
       const delivery = action.params.delivery || 'reply_preferred';
       if (delivery === 'reply_only' && !payload.replyToken) {
@@ -301,7 +293,7 @@ async function executeAction(
       // Prefer replyMessage (free) when replyToken is available
       if (shouldUseReply && payload.replyToken) {
         try {
-          await lineClient.replyMessage(payload.replyToken, [msg]);
+          await lineClient.replyMessage(payload.replyToken, messages);
           deliveryType = 'reply';
           // replyToken is single-use, clear it so subsequent actions fall back to push
           payload.replyToken = undefined;
@@ -311,7 +303,7 @@ async function executeAction(
           const errMsg = err instanceof Error ? err.message : String(err);
           const isTokenError = errMsg.includes('400') || errMsg.includes('Invalid reply token');
           if (isTokenError && allowPushFallback) {
-            await lineClient.pushMessage(friend.line_user_id, [msg]);
+            await lineClient.pushMessage(friend.line_user_id, messages);
             deliveryType = 'push';
           } else {
             throw err;
@@ -321,14 +313,14 @@ async function executeAction(
         if (!allowPushFallback) {
           throw new Error(`delivery=${delivery} cannot send without a valid replyToken`);
         }
-        await lineClient.pushMessage(friend.line_user_id, [msg]);
+        await lineClient.pushMessage(friend.line_user_id, messages);
         deliveryType = 'push';
       }
       const now = jstNow();
-      const content = msg.type === 'flex' ? JSON.stringify(msg.contents) : msg.text;
+      const content = JSON.stringify(messages);
       await db
         .prepare(`INSERT INTO messages_log (id, friend_id, direction, message_type, content, delivery_type, source, created_at) VALUES (?, ?, 'outgoing', ?, ?, ?, 'automation', ?)`)
-        .bind(crypto.randomUUID(), friendId, msg.type, content, deliveryType, now)
+        .bind(crypto.randomUUID(), friendId, msgType, content, deliveryType, now)
         .run();
       await db
         .prepare(`UPDATE chats SET status = 'in_progress', last_message_at = ?, updated_at = ? WHERE friend_id = ?`)
@@ -404,31 +396,6 @@ async function executeAction(
     default:
       console.warn(`未知のアクションタイプ: ${action.type}`);
   }
-}
-
-function normalizeFlexContents(contents: unknown): unknown {
-  if (Array.isArray(contents)) {
-    return {
-      type: 'carousel',
-      contents: contents
-        .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
-        .slice(0, 5),
-    };
-  }
-
-  if (contents && typeof contents === 'object') {
-    const node = contents as { type?: string; contents?: unknown[] };
-    if (node.type === 'carousel' && Array.isArray(node.contents)) {
-      return {
-        ...node,
-        contents: node.contents
-          .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
-          .slice(0, 5),
-      };
-    }
-  }
-
-  return contents;
 }
 
 /** 通知ルール処理 */

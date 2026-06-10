@@ -40,6 +40,7 @@ interface FlexBubbleDraft {
 interface FlexDraftState {
   size: 'kilo' | 'mega' | 'giga'
   primaryColor: string
+  deliveryShape: 'carousel' | 'messages'
   bubbles: FlexBubbleDraft[]
 }
 
@@ -55,6 +56,7 @@ const emptyFlexBubble = (): FlexBubbleDraft => ({
 const initialFlexDraft = (): FlexDraftState => ({
   size: 'mega',
   primaryColor: '#06C755',
+  deliveryShape: 'carousel',
   bubbles: [emptyFlexBubble()],
 })
 
@@ -380,7 +382,7 @@ export default function TemplatesPage() {
 
   const addFlexBubble = () => {
     setFlexDraft((current) => {
-      if (current.bubbles.length >= 5) return current
+      if (current.bubbles.length >= 12) return current
       const next = { ...current, bubbles: [...current.bubbles, emptyFlexBubble()] }
       setActiveBubbleIndex(next.bubbles.length - 1)
       return next
@@ -713,12 +715,14 @@ export default function TemplatesPage() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="text-xs font-bold text-green-900">Flexカスタム</p>
-                      <p className="mt-1 text-xs text-green-800">1通のFlex内に最大5バブルまで入れられます。</p>
+                      <p className="mt-1 text-xs text-green-800">
+                        Flex carouselは最大12バブル、LINE messages配列は最大5 message objectsです。
+                      </p>
                     </div>
                     <button
                       type="button"
                       onClick={addFlexBubble}
-                      disabled={flexDraft.bubbles.length >= 5}
+                      disabled={flexDraft.bubbles.length >= 12}
                       className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-green-700 disabled:opacity-50"
                     >
                       バブル追加
@@ -739,6 +743,16 @@ export default function TemplatesPage() {
                     ))}
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="保存形式">
+                      <select
+                        value={flexDraft.deliveryShape}
+                        onChange={(e) => setFlexDraft({ ...flexDraft, deliveryShape: e.target.value as FlexDraftState['deliveryShape'] })}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                      >
+                        <option value="carousel">1つのFlex carouselにまとめる 最大12バブル</option>
+                        <option value="messages">LINE messages配列で送る 最大5 message objects</option>
+                      </select>
+                    </Field>
                     <Field label="カードサイズ">
                       <select
                         value={flexDraft.size}
@@ -759,6 +773,11 @@ export default function TemplatesPage() {
                       />
                     </Field>
                   </div>
+                  {flexDraft.deliveryShape === 'messages' && flexDraft.bubbles.length > 5 && (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      messages配列では先頭5バブルだけを5つのFlex message objectsとして保存します。6枚目以降も使う場合はcarousel形式を選んでください。
+                    </p>
+                  )}
                   <Field label="画像アップロード">
                     <input
                       type="file"
@@ -1053,7 +1072,16 @@ function buildReservationFlexCard(input: ReservationCardForm): string {
 }
 
 function buildCustomFlexMessage(input: FlexDraftState): string {
-  const bubbles = input.bubbles.slice(0, 5).map((bubble) => buildCustomFlexBubble(bubble, input.size, input.primaryColor))
+  if (input.deliveryShape === 'messages') {
+    const messages = input.bubbles.slice(0, 5).map((bubble, index) => ({
+      type: 'flex',
+      altText: bubble.title.trim() || `Flex ${index + 1}`,
+      contents: buildCustomFlexBubble(bubble, input.size, input.primaryColor),
+    }))
+    return JSON.stringify(messages, null, 2)
+  }
+
+  const bubbles = input.bubbles.slice(0, 12).map((bubble) => buildCustomFlexBubble(bubble, input.size, input.primaryColor))
   const contents = bubbles.length === 1
     ? bubbles[0]
     : { type: 'carousel', contents: bubbles }

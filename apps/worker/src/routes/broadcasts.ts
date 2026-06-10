@@ -7,7 +7,7 @@ import {
 } from '@line-crm/db';
 import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetType } from '@line-crm/db';
 import { LineClient } from '@line-crm/line-sdk';
-import { processBroadcastSend, buildMessage } from '../services/broadcast.js';
+import { processBroadcastSend, buildMessages } from '../services/broadcast.js';
 import { processSegmentSend } from '../services/segment-send.js';
 import type { SegmentCondition } from '../services/segment-query.js';
 import { getLineAccountById } from '@line-crm/db';
@@ -465,7 +465,7 @@ broadcasts.post('/api/broadcasts/:id/test-send', async (c) => {
 
     const { extractFlexAltText } = await import('../utils/flex-alt-text.js');
     const altText = raw.alt_text as string || (tracked.messageType === 'flex' ? extractFlexAltText(tracked.content) : undefined);
-    const message = buildMessage(tracked.messageType, tracked.content, altText);
+    const messages = buildMessages(tracked.messageType, tracked.content, altText);
 
     let sent = 0;
     let failed = 0;
@@ -473,7 +473,7 @@ broadcasts.post('/api/broadcasts/:id/test-send', async (c) => {
 
     for (const friend of friends.results) {
       try {
-        await lineClient.pushMessage(friend.line_user_id, [message]);
+        await lineClient.pushMessage(friend.line_user_id, messages);
         sent++;
         await c.env.DB.prepare(
           `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, delivery_type, source, created_at)

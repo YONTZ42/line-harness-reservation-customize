@@ -1,5 +1,3 @@
-import { extractFlexAltText } from '../utils/flex-alt-text.js';
-
 /**
  * リマインダ配信処理 — cronトリガーで定期実行
  *
@@ -13,8 +11,9 @@ import {
   getFriendById,
   jstNow,
 } from '@line-crm/db';
-import type { LineClient, Message } from '@line-crm/line-sdk';
+import type { LineClient } from '@line-crm/line-sdk';
 import { addJitter, sleep } from './stealth.js';
+import { buildMessages } from './message-builder.js';
 
 export async function processReminderDeliveries(
   db: D1Database,
@@ -49,8 +48,8 @@ export async function processReminderDeliveries(
       }
 
       for (const step of fr.steps) {
-        const message = buildMessage(step.message_type, step.message_content);
-        await deliveryClient.pushMessage(friend.line_user_id, [message]);
+        const messages = buildMessages(step.message_type, step.message_content);
+        await deliveryClient.pushMessage(friend.line_user_id, messages);
 
         // Mark as delivered AFTER successful send.
         // INSERT OR IGNORE prevents duplicate records if parallel workers both sent.
@@ -78,52 +77,4 @@ export async function processReminderDeliveries(
       console.error(`リマインダ配信エラー (friend_reminder ${fr.id}):`, err);
     }
   }
-}
-
-function buildMessage(messageType: string, messageContent: string, altText?: string): Message {
-  if (messageType === 'text') {
-    return { type: 'text', text: messageContent };
-  }
-  if (messageType === 'image') {
-    try {
-      const parsed = JSON.parse(messageContent) as { originalContentUrl: string; previewImageUrl: string };
-      return { type: 'image', originalContentUrl: parsed.originalContentUrl, previewImageUrl: parsed.previewImageUrl };
-    } catch {
-      return { type: 'text', text: messageContent };
-    }
-  }
-  if (messageType === 'flex') {
-    try {
-      const contents = normalizeFlexContents(JSON.parse(messageContent));
-      return { type: 'flex', altText: altText || extractFlexAltText(contents), contents };
-    } catch {
-      return { type: 'text', text: messageContent };
-    }
-  }
-  return { type: 'text', text: messageContent };
-}
-
-function normalizeFlexContents(contents: unknown): unknown {
-  if (Array.isArray(contents)) {
-    return {
-      type: 'carousel',
-      contents: contents
-        .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
-        .slice(0, 5),
-    };
-  }
-
-  if (contents && typeof contents === 'object') {
-    const node = contents as { type?: string; contents?: unknown[] };
-    if (node.type === 'carousel' && Array.isArray(node.contents)) {
-      return {
-        ...node,
-        contents: node.contents
-          .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
-          .slice(0, 5),
-      };
-    }
-  }
-
-  return contents;
 }

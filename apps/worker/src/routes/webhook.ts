@@ -16,7 +16,7 @@ import {
   recordUserEvent,
 } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
-import { buildMessage, expandVariables } from '../services/step-delivery.js';
+import { buildMessage, buildMessages, expandVariables } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
 import { defaultLiffUrl, defaultLineAccessToken, defaultLineChannelSecret, workerBaseUrl } from '../services/line-bindings.js';
 import { hasColumn } from '../utils/db-compat.js';
@@ -251,8 +251,8 @@ async function handleEvent(
                 const { resolveMetadata } = await import('../services/step-delivery.js');
                 const resolvedMeta = await resolveMetadata(db, { user_id: (friend as unknown as Record<string, string | null>).user_id, metadata: (friend as unknown as Record<string, string | null>).metadata });
                 const expandedContent = expandVariables(firstStep.message_content, { ...friend, metadata: resolvedMeta } as Parameters<typeof expandVariables>[1]);
-                const message = buildMessage(firstStep.message_type, expandedContent);
-                await lineClient.replyMessage(event.replyToken, [message]);
+                const messages = buildMessages(firstStep.message_type, expandedContent);
+                await lineClient.replyMessage(event.replyToken, messages);
                 console.log(`Immediate delivery: sent step ${firstStep.id} to ${userId}`);
 
                 // Log outgoing message (replyMessage = 無料)
@@ -379,8 +379,8 @@ async function handleEvent(
           const { resolveMetadata } = await import('../services/step-delivery.js');
           const resolvedMeta = await resolveMetadata(db, { user_id: (friend as unknown as Record<string, string | null>).user_id, metadata: (friend as unknown as Record<string, string | null>).metadata });
           const expandedContent = expandVariables(rule.response_content, { ...friend, metadata: resolvedMeta } as Parameters<typeof expandVariables>[1], workerUrl);
-          const replyMsg = buildMessage(rule.response_type, expandedContent);
-          await lineClient.replyMessage(event.replyToken, [replyMsg]);
+          const replyMessages = buildMessages(rule.response_type, expandedContent);
+          await lineClient.replyMessage(event.replyToken, replyMessages);
 
           // 送信ログ — チャット画面に表示するため messages_log に残す
           await db
@@ -611,8 +611,8 @@ async function handleEvent(
           const { resolveMetadata: resolveMeta2 } = await import('../services/step-delivery.js');
           const resolvedMeta2 = await resolveMeta2(db, { user_id: (friend as unknown as Record<string, string | null>).user_id, metadata: (friend as unknown as Record<string, string | null>).metadata });
           const expandedContent = expandVariables(rule.response_content, { ...friend, metadata: resolvedMeta2 } as Parameters<typeof expandVariables>[1], workerUrl);
-          const replyMsg = buildMessage(rule.response_type, expandedContent);
-          await lineClient.replyMessage(event.replyToken, [replyMsg]);
+          const replyMessages = buildMessages(rule.response_type, expandedContent);
+          await lineClient.replyMessage(event.replyToken, replyMessages);
           replyTokenConsumed = true;
 
           // 送信ログ（replyMessage = 無料）

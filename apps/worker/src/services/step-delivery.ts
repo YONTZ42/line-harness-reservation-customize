@@ -1,4 +1,3 @@
-import { extractFlexAltText } from '../utils/flex-alt-text.js';
 import {
   getFriendScenariosDueForDelivery,
   getScenarioSteps,
@@ -9,8 +8,8 @@ import {
   jstNow,
 } from '@line-crm/db';
 import type { LineClient } from '@line-crm/line-sdk';
-import type { Message } from '@line-crm/line-sdk';
 import { jitterDeliveryTime, addJitter, sleep } from './stealth.js';
+import { buildMessage as buildLineMessage, buildMessages as buildLineMessages } from './message-builder.js';
 
 /**
  * Replace template variables in message content.
@@ -226,7 +225,7 @@ async function processSingleDelivery(
     trackedType = tracked.messageType;
     trackedContent = tracked.content;
   }
-  const message = buildMessage(trackedType, trackedContent);
+  const messages = buildLineMessages(trackedType, trackedContent);
   // Resolve the correct LINE client for this friend's account
   let deliveryClient = lineClient;
   const friendAccountId = (friend as unknown as Record<string, string | null>).line_account_id;
@@ -238,7 +237,7 @@ async function processSingleDelivery(
       deliveryClient = new LC(account.channel_access_token);
     }
   }
-  await deliveryClient.pushMessage(friend.line_user_id, [message]);
+  await deliveryClient.pushMessage(friend.line_user_id, messages);
 
   // Log outgoing message
   const logId = crypto.randomUUID();
@@ -314,99 +313,5 @@ async function evaluateCondition(
 }
 
 
-/** Remove empty text nodes and boxes with empty text from Flex JSON */
-function cleanEmptyNodes(obj: unknown): void {
-  if (!obj || typeof obj !== 'object') return;
-  const node = obj as Record<string, unknown>;
-  for (const key of ['header', 'body', 'footer']) {
-    if (node[key]) cleanEmptyNodes(node[key]);
-  }
-  if (Array.isArray(node.contents)) {
-    // First clean children recursively
-    for (const c of node.contents as unknown[]) cleanEmptyNodes(c);
-    // Then filter out empty nodes
-    node.contents = (node.contents as unknown[]).filter((c) => {
-      if (!c || typeof c !== 'object') return true;
-      const child = c as Record<string, unknown>;
-      // Remove empty text nodes
-      if (child.type === 'text') {
-        const text = child.text;
-        return typeof text === 'string' && text.trim().length > 0;
-      }
-      // Remove box nodes where any text child is empty (metadata rows with no value)
-      if (child.type === 'box' && Array.isArray(child.contents)) {
-        const texts = (child.contents as Array<Record<string, unknown>>).filter(t => t.type === 'text');
-        if (texts.length >= 2) {
-          // horizontal box with label + value — remove if value is empty
-          const hasEmptyText = texts.some(t => typeof t.text === 'string' && t.text.trim() === '');
-          if (hasEmptyText) return false;
-        }
-      }
-      return true;
-    });
-  }
-}
-
-export function buildMessage(messageType: string, messageContent: string, altText?: string): Message {
-  if (messageType === 'text') {
-    return { type: 'text', text: messageContent };
-  }
-
-  if (messageType === 'image') {
-    // messageContent is expected to be JSON: { originalContentUrl, previewImageUrl }
-    try {
-      const parsed = JSON.parse(messageContent) as {
-        originalContentUrl: string;
-        previewImageUrl: string;
-      };
-      return {
-        type: 'image',
-        originalContentUrl: parsed.originalContentUrl,
-        previewImageUrl: parsed.previewImageUrl,
-      };
-    } catch {
-      // Fallback: treat as text if parsing fails
-      return { type: 'text', text: messageContent };
-    }
-  }
-
-  if (messageType === 'flex') {
-    try {
-      const contents = normalizeFlexContents(JSON.parse(messageContent));
-      // Remove empty text nodes (from {{#if_ref}} conditional blocks)
-      cleanEmptyNodes(contents);
-      // Extract first text element for altText (shown in notifications)
-      return { type: 'flex', altText: altText || extractFlexAltText(contents), contents };
-    } catch {
-      return { type: 'text', text: messageContent };
-    }
-  }
-
-  // Fallback
-  return { type: 'text', text: messageContent };
-}
-
-function normalizeFlexContents(contents: unknown): unknown {
-  if (Array.isArray(contents)) {
-    return {
-      type: 'carousel',
-      contents: contents
-        .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
-        .slice(0, 5),
-    };
-  }
-
-  if (contents && typeof contents === 'object') {
-    const node = contents as { type?: string; contents?: unknown[] };
-    if (node.type === 'carousel' && Array.isArray(node.contents)) {
-      return {
-        ...node,
-        contents: node.contents
-          .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
-          .slice(0, 5),
-      };
-    }
-  }
-
-  return contents;
-}
+export const buildMessage = buildLineMessage;
+export const buildMessages = buildLineMessages;

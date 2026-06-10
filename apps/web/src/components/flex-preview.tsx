@@ -234,6 +234,46 @@ export default function FlexPreview({ content, maxWidth }: { content: string; ma
   try {
     const parsed = JSON.parse(content)
 
+    if (Array.isArray(parsed)) {
+      const lineMessages = parsed.filter((item) => item && typeof item === 'object' && typeof item.type === 'string')
+      if (lineMessages.length > 0) {
+        return (
+          <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', padding: '4px 0' }}>
+            {lineMessages.slice(0, 5).map((message: FlexNode, index: number) => {
+              if (message.type === 'flex' && message.contents) {
+                const contents = message.contents as unknown as FlexNode
+                if (contents.type === 'carousel' && Array.isArray(contents.contents)) {
+                  return (
+                    <div key={index} style={{ display: 'flex', gap: '8px' }}>
+                      {contents.contents.map((bubble: FlexNode, bubbleIndex: number) => (
+                        <FlexBubble key={bubbleIndex} bubble={bubble} maxWidth={maxWidth} />
+                      ))}
+                    </div>
+                  )
+                }
+                if (contents.type === 'bubble') return <FlexBubble key={index} bubble={contents} maxWidth={maxWidth} />
+              }
+              if (message.type === 'image' && message.originalContentUrl) {
+                return <img key={index} src={message.originalContentUrl} alt="" style={{ maxWidth: maxWidth || 300, maxHeight: 220, objectFit: 'contain', borderRadius: 8 }} />
+              }
+              if (message.type === 'text') {
+                return <div key={index} className="rounded-lg bg-[#8FE1B8] p-3 text-sm font-semibold text-gray-900">{message.text || ''}</div>
+              }
+              return <pre key={index} className="text-xs bg-gray-50 rounded p-2 max-h-40 overflow-auto">{JSON.stringify(message, null, 2)}</pre>
+            })}
+          </div>
+        )
+      }
+
+      return (
+        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '4px 0' }}>
+          {parsed.map((bubble: FlexNode, i: number) => (
+            <FlexBubble key={i} bubble={bubble} maxWidth={maxWidth} />
+          ))}
+        </div>
+      )
+    }
+
     if (parsed.type === 'carousel' && Array.isArray(parsed.contents)) {
       return (
         <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '4px 0' }}>

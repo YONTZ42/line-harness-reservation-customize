@@ -1,4 +1,3 @@
-import { extractFlexAltText } from '../utils/flex-alt-text.js';
 import {
   getBroadcastById,
   getBroadcasts,
@@ -12,9 +11,9 @@ import {
 } from '@line-crm/db';
 import type { Broadcast } from '@line-crm/db';
 import type { LineClient } from '@line-crm/line-sdk';
-import type { Message } from '@line-crm/line-sdk';
 import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js';
 import { hasColumn } from '../utils/db-compat.js';
+import { addVariationToSingleTextMessage, buildMessage, buildMessages } from './message-builder.js';
 
 const MULTICAST_BATCH_SIZE = 500;
 
@@ -42,14 +41,14 @@ export async function processBroadcastSend(
     finalContent = tracked.content;
   }
   const altText = (broadcast as unknown as Record<string, unknown>).alt_text as string | undefined;
-  const message = buildMessage(finalType, finalContent, altText || undefined);
+  const messages = buildMessages(finalType, finalContent, altText || undefined);
   let totalCount = 0;
   let successCount = 0;
 
   try {
     if (broadcast.target_type === 'all') {
       // Use LINE broadcast API (sends to all followers)
-      const { requestId } = await lineClient.broadcast([message]);
+      const { requestId } = await lineClient.broadcast(messages);
       await updateBroadcastLineRequestId(db, broadcast.id, requestId, null);
       // We don't have exact count for broadcast API, set as 0 (unknown)
       totalCount = 0;
@@ -79,13 +78,12 @@ export async function processBroadcastSend(
         }
 
         // Stealth: add slight variation to text messages
-        let batchMessage = message;
-        if (message.type === 'text' && totalBatches > 1) {
-          batchMessage = { ...message, text: addMessageVariation(message.text, batchIndex) };
-        }
+        const batchMessages = totalBatches > 1
+          ? addVariationToSingleTextMessage(messages, batchIndex, addMessageVariation)
+          : messages;
 
         try {
-          await lineClient.multicast(lineUserIds, [batchMessage], [unit]);
+          await lineClient.multicast(lineUserIds, batchMessages, [unit]);
           successCount += batch.length;
 
           // Log only successfully sent messages (batch insert for performance)
@@ -229,7 +227,7 @@ async function processQueuedBroadcastBatches(
   }
 
   const altText = raw.alt_text as string | undefined;
-  const message = buildMessage(finalType, finalContent, altText || undefined);
+  const messages = buildMessages(finalType, finalContent, altText || undefined);
 
   // 対象ユーザーリストを取得（アカウントで絞り込む）
   const accountId = raw.line_account_id as string | null;
@@ -253,7 +251,7 @@ async function processQueuedBroadcastBatches(
     friends = tagFriends.filter(f => f.is_following).map(f => ({ id: f.id, line_user_id: f.line_user_id }));
   } else {
     // target_type='all' でキューに入ることはないが、念のため
-    const { requestId } = await lineClient.broadcast([message]);
+    const { requestId } = await lineClient.broadcast(messages);
     await updateBroadcastLineRequestId(db, broadcast.id, requestId, null);
     await createBroadcastInsight(db, broadcast.id);
     await updateBroadcastStatus(db, broadcast.id, 'sent', { totalCount: 0, successCount: 0 });
@@ -284,13 +282,12 @@ async function processQueuedBroadcastBatches(
     }
 
     // テキストメッセージのバリエーション
-    let batchMessage = message;
-    if (message.type === 'text' && totalBatches > 1) {
-      batchMessage = { ...message, text: addMessageVariation((message as { text: string }).text, batchIndex) };
-    }
+    const batchMessages = totalBatches > 1
+      ? addVariationToSingleTextMessage(messages, batchIndex, addMessageVariation)
+      : messages;
 
     try {
-      await lineClient.multicast(lineUserIds, [batchMessage], [unit]);
+      await lineClient.multicast(lineUserIds, batchMessages, [unit]);
     } catch (err) {
       console.error(`Queued broadcast batch ${batchIndex} send failed:`, err);
       // 送信失敗: ロック解除 + offsetを保存して次のCronで再開
@@ -324,60 +321,4 @@ async function processQueuedBroadcastBatches(
   await updateBroadcastStatus(db, broadcast.id, 'sent');
 }
 
-export function buildMessage(messageType: string, messageContent: string, altText?: string): Message {
-  if (messageType === 'text') {
-    return { type: 'text', text: messageContent };
-  }
-
-  if (messageType === 'image') {
-    try {
-      const parsed = JSON.parse(messageContent) as {
-        originalContentUrl: string;
-        previewImageUrl: string;
-      };
-      return {
-        type: 'image',
-        originalContentUrl: parsed.originalContentUrl,
-        previewImageUrl: parsed.previewImageUrl,
-      };
-    } catch {
-      return { type: 'text', text: messageContent };
-    }
-  }
-
-  if (messageType === 'flex') {
-    try {
-      const contents = normalizeFlexContents(JSON.parse(messageContent));
-      return { type: 'flex', altText: altText || extractFlexAltText(contents), contents };
-    } catch {
-      return { type: 'text', text: messageContent };
-    }
-  }
-
-  return { type: 'text', text: messageContent };
-}
-
-function normalizeFlexContents(contents: unknown): unknown {
-  if (Array.isArray(contents)) {
-    return {
-      type: 'carousel',
-      contents: contents
-        .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
-        .slice(0, 5),
-    };
-  }
-
-  if (contents && typeof contents === 'object') {
-    const node = contents as { type?: string; contents?: unknown[] };
-    if (node.type === 'carousel' && Array.isArray(node.contents)) {
-      return {
-        ...node,
-        contents: node.contents
-          .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
-          .slice(0, 5),
-      };
-    }
-  }
-
-  return contents;
-}
+export { buildMessage, buildMessages } from './message-builder.js';
