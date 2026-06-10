@@ -28,6 +28,36 @@ interface CreateFormState {
   messageContent: string
 }
 
+interface FlexBubbleDraft {
+  title: string
+  body: string
+  imageUrl: string
+  buttonLabel: string
+  buttonUrl: string
+  footer: string
+}
+
+interface FlexDraftState {
+  size: 'kilo' | 'mega' | 'giga'
+  primaryColor: string
+  bubbles: FlexBubbleDraft[]
+}
+
+const emptyFlexBubble = (): FlexBubbleDraft => ({
+  title: '新しいお知らせ',
+  body: '本文を入力してください。',
+  imageUrl: '',
+  buttonLabel: '詳しく見る',
+  buttonUrl: '',
+  footer: '',
+})
+
+const initialFlexDraft = (): FlexDraftState => ({
+  size: 'mega',
+  primaryColor: '#06C755',
+  bubbles: [emptyFlexBubble()],
+})
+
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('ja-JP', {
     year: 'numeric',
@@ -89,6 +119,10 @@ export default function TemplatesPage() {
   const [formError, setFormError] = useState('')
   const [showReservationCard, setShowReservationCard] = useState(false)
   const [uploadingCardImage, setUploadingCardImage] = useState(false)
+  const [uploadingTemplateImage, setUploadingTemplateImage] = useState(false)
+  const [flexDraft, setFlexDraft] = useState<FlexDraftState>(initialFlexDraft)
+  const [activeBubbleIndex, setActiveBubbleIndex] = useState(0)
+  const [useJsonEditor, setUseJsonEditor] = useState(false)
   const [providerConfig, setProviderConfig] = useState<ApiProviderConfig | null>(null)
   const [reservationCard, setReservationCard] = useState<ReservationCardForm>(DEFAULT_RESERVATION_CARD)
 
@@ -135,6 +169,16 @@ export default function TemplatesPage() {
     new Set(templates.map((t) => t.category).filter(Boolean))
   )
 
+  const generatedFlexJson = buildCustomFlexMessage(flexDraft)
+
+  useEffect(() => {
+    if (!showCreate || form.messageType !== 'flex' || useJsonEditor) return
+    setForm((current) => current.messageContent === generatedFlexJson ? current : {
+      ...current,
+      messageContent: generatedFlexJson,
+    })
+  }, [showCreate, form.messageType, generatedFlexJson, useJsonEditor])
+
   const handleCreate = async () => {
     if (!form.name.trim()) {
       setFormError('テンプレート名を入力してください')
@@ -160,6 +204,9 @@ export default function TemplatesPage() {
       })
       setShowCreate(false)
       setForm({ name: '', category: '', messageType: 'text', messageContent: '' })
+      setFlexDraft(initialFlexDraft())
+      setActiveBubbleIndex(0)
+      setUseJsonEditor(false)
       await load()
     } catch {
       setFormError('作成に失敗しました')
@@ -290,6 +337,65 @@ export default function TemplatesPage() {
     }
   }
 
+  const handleTemplateImageUpload = async (file: File | undefined, bubbleIndex: number) => {
+    if (!file) return
+    if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type)) {
+      setFormError('画像は PNG / JPEG / GIF / WebP を選択してください')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setFormError('画像は5MB以下にしてください')
+      return
+    }
+    setUploadingTemplateImage(true)
+    setFormError('')
+    try {
+      const client = createLineHarnessClient()
+      const uploaded = await client.images.upload({
+        data: await fileToDataUrl(file),
+        mimeType: file.type,
+        filename: file.name,
+      })
+      setFlexDraft((current) => ({
+        ...current,
+        bubbles: current.bubbles.map((bubble, index) => (
+          index === bubbleIndex ? { ...bubble, imageUrl: uploaded.url } : bubble
+        )),
+      }))
+    } catch {
+      setFormError('画像アップロードに失敗しました。R2 bindingとWorker URLを確認してください')
+    } finally {
+      setUploadingTemplateImage(false)
+    }
+  }
+
+  const updateActiveBubble = (updates: Partial<FlexBubbleDraft>) => {
+    setFlexDraft((current) => ({
+      ...current,
+      bubbles: current.bubbles.map((bubble, index) => (
+        index === activeBubbleIndex ? { ...bubble, ...updates } : bubble
+      )),
+    }))
+  }
+
+  const addFlexBubble = () => {
+    setFlexDraft((current) => {
+      if (current.bubbles.length >= 5) return current
+      const next = { ...current, bubbles: [...current.bubbles, emptyFlexBubble()] }
+      setActiveBubbleIndex(next.bubbles.length - 1)
+      return next
+    })
+  }
+
+  const removeActiveBubble = () => {
+    setFlexDraft((current) => {
+      if (current.bubbles.length <= 1) return current
+      const nextBubbles = current.bubbles.filter((_, index) => index !== activeBubbleIndex)
+      setActiveBubbleIndex(Math.max(0, activeBubbleIndex - 1))
+      return { ...current, bubbles: nextBubbles }
+    })
+  }
+
   return (
     <div>
       <Header
@@ -304,7 +410,16 @@ export default function TemplatesPage() {
               予約導線カードを作成
             </button>
             <button
-              onClick={() => { setShowCreate(true); setShowReservationCard(false) }}
+              onClick={() => {
+                setShowCreate(true)
+                setShowReservationCard(false)
+                setEditingTemplateId(null)
+                setFormError('')
+                setForm((current) => ({
+                  ...current,
+                  messageType: current.messageType === 'text' && !current.messageContent ? 'flex' : current.messageType,
+                }))
+              }}
               className="px-4 py-2 text-sm font-medium text-gray-700 rounded-lg bg-gray-100 hover:bg-gray-200"
             >
               + 新規テンプレート
@@ -548,68 +663,232 @@ export default function TemplatesPage() {
       {/* Create form */}
       {showCreate && (
         <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-sm font-semibold text-gray-800 mb-4">新規テンプレートを作成</h2>
-          <div className="space-y-4 max-w-lg">
+          <div className="mb-4 flex items-start justify-between gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">テンプレート名 <span className="text-red-500">*</span></label>
-              <input
-                type="text"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                placeholder="例: ウェルカムメッセージ"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
+              <h2 className="text-sm font-semibold text-gray-800">新規テンプレートを作成</h2>
+              <p className="mt-1 text-xs text-gray-500">基本はプレビューを見ながらFlexを作ります。JSON直接編集は下の詳細設定に移しました。</p>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">カテゴリ <span className="text-red-500">*</span></label>
-              <input
-                type="text"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                placeholder="例: 挨拶、キャンペーン、通知"
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">メッセージタイプ</label>
-              <select
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
-                value={form.messageType}
-                onChange={(e) => setForm({ ...form, messageType: e.target.value })}
-              >
-                <option value="text">テキスト</option>
-                <option value="image">画像</option>
-                <option value="flex">Flex</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">メッセージ内容 <span className="text-red-500">*</span></label>
-              <textarea
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
-                rows={4}
-                placeholder="メッセージ内容を入力してください"
-                value={form.messageContent}
-                onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
-              />
-            </div>
+            <button onClick={() => { setShowCreate(false); setFormError('') }} className="text-xs text-gray-500 hover:text-gray-700">閉じる</button>
+          </div>
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="テンプレート名">
+                  <input
+                    type="text"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="例: ウェルカムカード"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                </Field>
+                <Field label="カテゴリ">
+                  <input
+                    type="text"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="例: 挨拶、キャンペーン、通知"
+                    value={form.category}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  />
+                </Field>
+              </div>
+              <Field label="メッセージタイプ">
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                  value={form.messageType}
+                  onChange={(e) => {
+                    const messageType = e.target.value
+                    setForm({ ...form, messageType, messageContent: messageType === 'flex' ? generatedFlexJson : '' })
+                    setUseJsonEditor(false)
+                  }}
+                >
+                  <option value="flex">Flexカード</option>
+                  <option value="text">テキスト</option>
+                  <option value="image">画像</option>
+                </select>
+              </Field>
 
-            {formError && <p className="text-xs text-red-600">{formError}</p>}
+              {form.messageType === 'flex' ? (
+                <div className="space-y-4 rounded-lg border border-green-100 bg-green-50 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-bold text-green-900">Flexカスタム</p>
+                      <p className="mt-1 text-xs text-green-800">1通のFlex内に最大5バブルまで入れられます。</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addFlexBubble}
+                      disabled={flexDraft.bubbles.length >= 5}
+                      className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-green-700 disabled:opacity-50"
+                    >
+                      バブル追加
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {flexDraft.bubbles.map((bubble, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => setActiveBubbleIndex(index)}
+                        className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                          activeBubbleIndex === index ? 'bg-green-600 text-white' : 'bg-white text-gray-700'
+                        }`}
+                      >
+                        {index + 1}. {bubble.title || '未設定'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="カードサイズ">
+                      <select
+                        value={flexDraft.size}
+                        onChange={(e) => setFlexDraft({ ...flexDraft, size: e.target.value as FlexDraftState['size'] })}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                      >
+                        <option value="kilo">小さめ</option>
+                        <option value="mega">標準</option>
+                        <option value="giga">大きめ</option>
+                      </select>
+                    </Field>
+                    <Field label="メインカラー">
+                      <input
+                        type="color"
+                        value={flexDraft.primaryColor}
+                        onChange={(e) => setFlexDraft({ ...flexDraft, primaryColor: e.target.value })}
+                        className="h-10 w-full rounded-lg border border-gray-300 bg-white px-2 py-1"
+                      />
+                    </Field>
+                  </div>
+                  <Field label="画像アップロード">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/gif,image/webp"
+                      disabled={uploadingTemplateImage}
+                      onChange={(e) => void handleTemplateImageUpload(e.target.files?.[0], activeBubbleIndex)}
+                      className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:font-medium file:text-green-700 disabled:opacity-50"
+                    />
+                  </Field>
+                  <Field label="画像URL">
+                    <input
+                      value={flexDraft.bubbles[activeBubbleIndex]?.imageUrl ?? ''}
+                      onChange={(e) => updateActiveBubble({ imageUrl: e.target.value })}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      placeholder="https://..."
+                    />
+                  </Field>
+                  <Field label="タイトル">
+                    <input
+                      value={flexDraft.bubbles[activeBubbleIndex]?.title ?? ''}
+                      onChange={(e) => updateActiveBubble({ title: e.target.value })}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    />
+                  </Field>
+                  <Field label="本文">
+                    <textarea
+                      value={flexDraft.bubbles[activeBubbleIndex]?.body ?? ''}
+                      onChange={(e) => updateActiveBubble({ body: e.target.value })}
+                      rows={3}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    />
+                  </Field>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="ボタン表示">
+                      <input
+                        value={flexDraft.bubbles[activeBubbleIndex]?.buttonLabel ?? ''}
+                        onChange={(e) => updateActiveBubble({ buttonLabel: e.target.value })}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </Field>
+                    <Field label="ボタンURL">
+                      <input
+                        value={flexDraft.bubbles[activeBubbleIndex]?.buttonUrl ?? ''}
+                        onChange={(e) => updateActiveBubble({ buttonUrl: e.target.value })}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        placeholder="https://..."
+                      />
+                    </Field>
+                  </div>
+                  <Field label="フッター">
+                    <input
+                      value={flexDraft.bubbles[activeBubbleIndex]?.footer ?? ''}
+                      onChange={(e) => updateActiveBubble({ footer: e.target.value })}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    />
+                  </Field>
+                  <button
+                    type="button"
+                    onClick={removeActiveBubble}
+                    disabled={flexDraft.bubbles.length <= 1}
+                    className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-red-600 disabled:opacity-50"
+                  >
+                    選択中のバブルを削除
+                  </button>
+                  <details className="rounded-lg border border-gray-200 bg-white p-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-gray-700">JSON詳細設定</summary>
+                    <label className="mt-3 flex items-center gap-2 text-xs text-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={useJsonEditor}
+                        onChange={(e) => {
+                          setUseJsonEditor(e.target.checked)
+                          if (!e.target.checked) setForm({ ...form, messageContent: generatedFlexJson })
+                        }}
+                      />
+                      JSONを直接編集する
+                    </label>
+                    <textarea
+                      readOnly={!useJsonEditor}
+                      value={useJsonEditor ? form.messageContent : generatedFlexJson}
+                      onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
+                      rows={10}
+                      className="mt-3 w-full rounded-lg border border-gray-200 bg-gray-50 p-3 font-mono text-xs text-gray-700"
+                    />
+                  </details>
+                </div>
+              ) : (
+                <Field label={form.messageType === 'image' ? '画像URL' : 'メッセージ内容'}>
+                  <textarea
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+                    rows={4}
+                    placeholder={form.messageType === 'image' ? 'https://...' : 'メッセージ内容を入力してください'}
+                    value={form.messageContent}
+                    onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
+                  />
+                </Field>
+              )}
 
-            <div className="flex gap-2">
-              <button
-                onClick={handleCreate}
-                disabled={saving}
-                className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-                style={{ backgroundColor: '#06C755' }}
-              >
-                {saving ? '作成中...' : '作成'}
-              </button>
-              <button
-                onClick={() => { setShowCreate(false); setFormError('') }}
-                className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-              >
-                キャンセル
-              </button>
+              {formError && <p className="text-xs text-red-600">{formError}</p>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCreate}
+                  disabled={saving}
+                  className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
+                  style={{ backgroundColor: '#06C755' }}
+                >
+                  {saving ? '作成中...' : '作成'}
+                </button>
+                <button
+                  onClick={() => { setShowCreate(false); setFormError('') }}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-medium text-gray-600">プレビュー</p>
+              {form.messageType === 'flex' ? (
+                <FlexPreviewComponent content={useJsonEditor ? form.messageContent : generatedFlexJson} maxWidth={flexDraft.size === 'giga' ? 340 : flexDraft.size === 'kilo' ? 260 : 300} />
+              ) : form.messageType === 'image' && form.messageContent.trim() ? (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <img src={form.messageContent.trim()} alt="画像テンプレート" className="max-h-64 rounded-lg object-contain" />
+                </div>
+              ) : (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 whitespace-pre-wrap">
+                  {form.messageContent || 'プレビューがここに表示されます。'}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -771,4 +1050,64 @@ function buildReservationFlexCard(input: ReservationCardForm): string {
   }
 
   return JSON.stringify(bubble, null, 2)
+}
+
+function buildCustomFlexMessage(input: FlexDraftState): string {
+  const bubbles = input.bubbles.slice(0, 5).map((bubble) => buildCustomFlexBubble(bubble, input.size, input.primaryColor))
+  const contents = bubbles.length === 1
+    ? bubbles[0]
+    : { type: 'carousel', contents: bubbles }
+  return JSON.stringify(contents, null, 2)
+}
+
+function buildCustomFlexBubble(input: FlexBubbleDraft, size: FlexDraftState['size'], primaryColor: string): Record<string, unknown> {
+  const title = input.title.trim() || 'タイトル'
+  const body = input.body.trim() || '本文を入力してください。'
+  const imageUrl = input.imageUrl.trim()
+  const buttonLabel = input.buttonLabel.trim()
+  const buttonUrl = input.buttonUrl.trim()
+  const footer = input.footer.trim()
+
+  const bubble: Record<string, unknown> = {
+    type: 'bubble',
+    size,
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'md',
+      contents: [
+        { type: 'text', text: title, weight: 'bold', size: 'xl', wrap: true, color: primaryColor },
+        { type: 'text', text: body, size: 'sm', wrap: true, color: '#4B5563' },
+      ],
+    },
+  }
+
+  if (imageUrl) {
+    bubble.hero = {
+      type: 'image',
+      url: imageUrl,
+      size: 'full',
+      aspectRatio: '20:13',
+      aspectMode: 'cover',
+    }
+  }
+
+  if (buttonLabel || footer) {
+    bubble.footer = {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      contents: [
+        ...(buttonLabel ? [{
+          type: 'button',
+          style: 'primary',
+          color: primaryColor,
+          action: { type: 'uri', label: buttonLabel, uri: buttonUrl || 'https://example.com' },
+        }] : []),
+        ...(footer ? [{ type: 'text', text: footer, size: 'xs', align: 'center', color: '#6B7280', wrap: true }] : []),
+      ],
+    }
+  }
+
+  return bubble
 }

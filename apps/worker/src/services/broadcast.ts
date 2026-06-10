@@ -347,7 +347,7 @@ export function buildMessage(messageType: string, messageContent: string, altTex
 
   if (messageType === 'flex') {
     try {
-      const contents = JSON.parse(messageContent);
+      const contents = normalizeFlexContents(JSON.parse(messageContent));
       return { type: 'flex', altText: altText || extractFlexAltText(contents), contents };
     } catch {
       return { type: 'text', text: messageContent };
@@ -355,4 +355,29 @@ export function buildMessage(messageType: string, messageContent: string, altTex
   }
 
   return { type: 'text', text: messageContent };
+}
+
+function normalizeFlexContents(contents: unknown): unknown {
+  if (Array.isArray(contents)) {
+    return {
+      type: 'carousel',
+      contents: contents
+        .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
+        .slice(0, 5),
+    };
+  }
+
+  if (contents && typeof contents === 'object') {
+    const node = contents as { type?: string; contents?: unknown[] };
+    if (node.type === 'carousel' && Array.isArray(node.contents)) {
+      return {
+        ...node,
+        contents: node.contents
+          .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
+          .slice(0, 5),
+      };
+    }
+  }
+
+  return contents;
 }

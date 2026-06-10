@@ -286,7 +286,7 @@ async function executeAction(
       const msgType = action.params.messageType || 'text';
       let msg: Message;
       if (msgType === 'flex') {
-        const contents = JSON.parse(action.params.content);
+        const contents = normalizeFlexContents(JSON.parse(action.params.content));
         msg = { type: 'flex', altText: action.params.altText || extractFlexAltText(contents), contents };
       } else {
         msg = { type: 'text', text: action.params.content };
@@ -404,6 +404,31 @@ async function executeAction(
     default:
       console.warn(`未知のアクションタイプ: ${action.type}`);
   }
+}
+
+function normalizeFlexContents(contents: unknown): unknown {
+  if (Array.isArray(contents)) {
+    return {
+      type: 'carousel',
+      contents: contents
+        .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
+        .slice(0, 5),
+    };
+  }
+
+  if (contents && typeof contents === 'object') {
+    const node = contents as { type?: string; contents?: unknown[] };
+    if (node.type === 'carousel' && Array.isArray(node.contents)) {
+      return {
+        ...node,
+        contents: node.contents
+          .filter((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'bubble')
+          .slice(0, 5),
+      };
+    }
+  }
+
+  return contents;
 }
 
 /** 通知ルール処理 */
