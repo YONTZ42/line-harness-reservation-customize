@@ -2,10 +2,10 @@ name: Migrate D1
 
 # Required GitHub Secrets:
 # - CLOUDFLARE_API_TOKEN
-# - CLOUDFLARE_D1_DATABASE_ID
 #
 # Optional GitHub Variables:
 # - CLOUDFLARE_ACCOUNT_ID        can be a Secret or Variable
+# - CLOUDFLARE_D1_DATABASE_ID    can be a Secret or Variable
 # - CLOUDFLARE_D1_DATABASE_NAME   default: line-crm
 
 
@@ -58,7 +58,7 @@ jobs:
         working-directory: apps/worker
         env:
           CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
-          CF_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          CF_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID || vars.CLOUDFLARE_D1_DATABASE_ID }}
           CF_D1_DATABASE_NAME: ${{ inputs.database_name || vars.CLOUDFLARE_D1_DATABASE_NAME || 'line-crm' }}
           MIGRATION_FILE: ${{ inputs.migration_file }}
         run: |

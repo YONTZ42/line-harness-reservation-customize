@@ -24,7 +24,6 @@
 
 ```text
 CLOUDFLARE_API_TOKEN
-CLOUDFLARE_D1_DATABASE_ID
 API_KEY
 LINE_CHANNEL_ACCESS_TOKEN
 LINE_CHANNEL_SECRET
@@ -33,7 +32,6 @@ LINE_CHANNEL_SECRET
 説明:
 
 - `CLOUDFLARE_API_TOKEN`: GitHub Actions から Cloudflare へデプロイするために必要。
-- `CLOUDFLARE_D1_DATABASE_ID`: 事業者専用D1へWorkerを接続するために必要。
 - `API_KEY`: 管理画面からWorker APIを呼ぶために必要。
 - `LINE_CHANNEL_ACCESS_TOKEN`: LINE Messaging API送信用。
 - `LINE_CHANNEL_SECRET`: LINE webhook署名検証用。
@@ -43,6 +41,7 @@ LINE_CHANNEL_SECRET
 
 ```text
 CLOUDFLARE_ACCOUNT_ID
+CLOUDFLARE_D1_DATABASE_ID
 WORKER_NAME
 CLOUDFLARE_D1_DATABASE_NAME
 CLOUDFLARE_R2_BUCKET_NAME
@@ -54,6 +53,7 @@ NEXT_PUBLIC_API_URL
 説明:
 
 - `WORKER_NAME`: 事業者ごとのWorker名。例: `line-harness-client-a`
+- `CLOUDFLARE_D1_DATABASE_ID`: 事業者専用D1へWorkerを接続するために必要。SecretでもVariableでもよい。
 - `CLOUDFLARE_D1_DATABASE_NAME`: 事業者ごとのD1名。
 - `CLOUDFLARE_R2_BUCKET_NAME`: 画像保存用R2 bucket。
 - `CLOUDFLARE_PAGES_PROJECT_NAME`: console-v2を含むWeb管理画面のPages project。
