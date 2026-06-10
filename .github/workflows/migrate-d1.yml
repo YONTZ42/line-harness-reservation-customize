@@ -16,7 +16,7 @@ on:
         description: 'GitHub Environment to migrate'
         required: true
         type: string
-        default: production
+        default: production-client-filmtravel
       migration_file:
         description: SQL file under packages/db/migrations to execute
         required: true
@@ -34,13 +34,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: d1-migration-${{ inputs.environment || 'production' }}
+  group: d1-migration-${{ inputs.environment || vars.DEFAULT_DEPLOY_ENVIRONMENT || 'production-client-filmtravel' }}
   cancel-in-progress: false
 
 jobs:
   migrate:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment || 'production' }}
+    environment: ${{ inputs.environment || vars.DEFAULT_DEPLOY_ENVIRONMENT || 'production-client-filmtravel' }}
     steps:
       - uses: actions/checkout@v4
 

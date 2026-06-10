@@ -23,7 +23,7 @@ on:
         description: 'GitHub Environment to deploy'
         required: true
         type: string
-        default: production
+        default: production-client-filmtravel
   push:
     branches: [main]
     paths:
@@ -40,7 +40,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || vars.DEFAULT_DEPLOY_ENVIRONMENT || 'production-client-filmtravel' }}
     steps:
       - uses: actions/checkout@v4
 

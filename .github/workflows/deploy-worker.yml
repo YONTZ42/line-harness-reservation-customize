@@ -39,9 +39,20 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || vars.DEFAULT_DEPLOY_ENVIRONMENT || 'production-client-filmtravel' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Show deployment target
+        env:
+          TARGET_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || vars.DEFAULT_DEPLOY_ENVIRONMENT || 'production-client-filmtravel' }}
+          HAS_CF_ACCOUNT_ID: ${{ (secrets.CLOUDFLARE_ACCOUNT_ID != '' || vars.CLOUDFLARE_ACCOUNT_ID != '') && 'true' || 'false' }}
+          HAS_CF_D1_DATABASE_ID: ${{ (secrets.CLOUDFLARE_D1_DATABASE_ID != '' || vars.CLOUDFLARE_D1_DATABASE_ID != '') && 'true' || 'false' }}
+        run: |
+          echo "event_name=${GITHUB_EVENT_NAME}"
+          echo "target_environment=${TARGET_ENVIRONMENT}"
+          echo "has_cloudflare_account_id=${HAS_CF_ACCOUNT_ID}"
+          echo "has_cloudflare_d1_database_id=${HAS_CF_D1_DATABASE_ID}"
 
       - uses: pnpm/action-setup@v4
 
