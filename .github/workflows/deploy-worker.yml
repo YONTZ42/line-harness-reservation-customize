@@ -20,7 +20,7 @@ on:
         description: 'GitHub Environment to deploy'
         required: true
         type: string
-        default: production-filmtravel
+        default: production-client-filmtravel
       run_d1_compatibility_patches:
         description: 'Apply D1 compatibility patches before deploy. Prefer migrate-d1.yml for schema changes.'
         required: false
