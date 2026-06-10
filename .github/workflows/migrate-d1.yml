@@ -18,9 +18,9 @@ on:
         type: string
         default: production-client-filmtravel
       migration_file:
-        description: SQL file under packages/db/migrations to execute
+        description: SQL file to execute. Use packages/db/schema.sql for first setup, or a file under packages/db/migrations.
         required: true
-        default: packages/db/migrations/031_reservation_people_capacity.sql
+        default: packages/db/schema.sql
       database_name:
         description: Remote D1 database name
         required: false
@@ -74,14 +74,21 @@ jobs:
           if (!accountId) throw new Error('CF_ACCOUNT_ID is required');
           if (!databaseId) throw new Error('CF_D1_DATABASE_ID is required');
           if (!migrationFile) throw new Error('migration_file is required');
-          if (!migrationFile.startsWith('packages/db/migrations/') || !migrationFile.endsWith('.sql')) {
-            throw new Error('migration_file must be a .sql file under packages/db/migrations/');
+          const isSchemaFile = migrationFile === 'packages/db/schema.sql';
+          const isMigrationFile = migrationFile.startsWith('packages/db/migrations/');
+          if ((!isSchemaFile && !isMigrationFile) || !migrationFile.endsWith('.sql')) {
+            throw new Error('migration_file must be packages/db/schema.sql or a .sql file under packages/db/migrations/');
           }
 
           const repoRoot = path.resolve(process.cwd(), '../..');
           const absoluteMigrationFile = path.resolve(repoRoot, migrationFile);
           const migrationsDir = path.resolve(repoRoot, 'packages/db/migrations');
-          if (!absoluteMigrationFile.startsWith(migrationsDir + path.sep)) {
+          const schemaFile = path.resolve(repoRoot, 'packages/db/schema.sql');
+          if (isSchemaFile) {
+            if (absoluteMigrationFile !== schemaFile) {
+              throw new Error('migration_file must resolve to packages/db/schema.sql');
+            }
+          } else if (!absoluteMigrationFile.startsWith(migrationsDir + path.sep)) {
             throw new Error('migration_file must stay inside packages/db/migrations/');
           }
           if (!fs.existsSync(absoluteMigrationFile)) {
