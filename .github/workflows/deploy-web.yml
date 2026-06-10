@@ -15,6 +15,7 @@ name: Deploy Web
 # Cloudflare Pages project is created automatically when missing.
 # Project-level settings beyond the production branch are not managed here.
 
+
 on:
   workflow_dispatch:
     inputs:
