@@ -12,9 +12,8 @@ name: Deploy Web
 # - CLOUDFLARE_PAGES_PROJECT_NAME   optional, default: line-harness-reservation-web
 # - NEXT_PUBLIC_API_URL             example: https://line-harness-reservation.example.workers.dev
 #
-# Cloudflare Pages project must already exist.
-# This workflow only deploys the static export and does not create/update
-# project-level settings.
+# Cloudflare Pages project is created automatically when missing.
+# Project-level settings beyond the production branch are not managed here.
 
 on:
   workflow_dispatch:
@@ -78,6 +77,27 @@ jobs:
         run: pnpm --filter web build
         env:
           NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || vars.WORKER_URL }}
+
+      - name: Ensure Cloudflare Pages project exists
+        run: |
+          set +e
+          output="$(pnpm exec wrangler pages project create "$CLOUDFLARE_PAGES_PROJECT_NAME" --production-branch "$PAGES_PRODUCTION_BRANCH" 2>&1)"
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+          if echo "$output" | grep -qi "already exists"; then
+            echo "Cloudflare Pages project already exists: $CLOUDFLARE_PAGES_PROJECT_NAME"
+            exit 0
+          fi
+          exit "$status"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'line-harness-reservation-web' }}
+          PAGES_PRODUCTION_BRANCH: ${{ vars.PAGES_PRODUCTION_BRANCH || 'main' }}
 
       - name: Deploy to Cloudflare Pages
         run: pnpm exec wrangler pages deploy apps/web/out --project-name "$CLOUDFLARE_PAGES_PROJECT_NAME" --branch "$GITHUB_REF_NAME"
