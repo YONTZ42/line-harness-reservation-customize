@@ -18,6 +18,7 @@ import {
 const messageTypeLabels: Record<string, string> = {
   text: 'テキスト',
   image: '画像',
+  video: '動画',
   flex: 'Flex',
 }
 
@@ -42,6 +43,11 @@ interface FlexDraftState {
   primaryColor: string
   deliveryShape: 'carousel' | 'messages'
   bubbles: FlexBubbleDraft[]
+}
+
+interface VideoDraftState {
+  originalContentUrl: string
+  previewImageUrl: string
 }
 
 const emptyFlexBubble = (): FlexBubbleDraft => ({
@@ -122,7 +128,9 @@ export default function TemplatesPage() {
   const [showReservationCard, setShowReservationCard] = useState(false)
   const [uploadingCardImage, setUploadingCardImage] = useState(false)
   const [uploadingTemplateImage, setUploadingTemplateImage] = useState(false)
+  const [uploadingTemplateVideo, setUploadingTemplateVideo] = useState(false)
   const [flexDraft, setFlexDraft] = useState<FlexDraftState>(initialFlexDraft)
+  const [videoDraft, setVideoDraft] = useState<VideoDraftState>({ originalContentUrl: '', previewImageUrl: '' })
   const [activeBubbleIndex, setActiveBubbleIndex] = useState(0)
   const [useJsonEditor, setUseJsonEditor] = useState(false)
   const [providerConfig, setProviderConfig] = useState<ApiProviderConfig | null>(null)
@@ -201,12 +209,13 @@ export default function TemplatesPage() {
       await client.templates.create({
         name: form.name,
         category: form.category,
-        messageType: form.messageType as 'text' | 'image' | 'flex',
+        messageType: (form.messageType === 'video' ? 'flex' : form.messageType) as 'text' | 'image' | 'flex',
         messageContent: form.messageContent,
       })
       setShowCreate(false)
       setForm({ name: '', category: '', messageType: 'text', messageContent: '' })
       setFlexDraft(initialFlexDraft())
+      setVideoDraft({ originalContentUrl: '', previewImageUrl: '' })
       setActiveBubbleIndex(0)
       setUseJsonEditor(false)
       await load()
@@ -368,6 +377,75 @@ export default function TemplatesPage() {
       setFormError('画像アップロードに失敗しました。R2 bindingとWorker URLを確認してください')
     } finally {
       setUploadingTemplateImage(false)
+    }
+  }
+
+  const updateVideoMessageContent = (draft: VideoDraftState) => {
+    const originalContentUrl = draft.originalContentUrl.trim()
+    const previewImageUrl = draft.previewImageUrl.trim()
+    setForm((current) => ({
+      ...current,
+      messageContent: originalContentUrl && previewImageUrl
+        ? JSON.stringify([{ type: 'video', originalContentUrl, previewImageUrl }], null, 2)
+        : '',
+    }))
+  }
+
+  const handleTemplateVideoUpload = async (file: File | undefined) => {
+    if (!file) return
+    if (file.type !== 'video/mp4') {
+      setFormError('動画はMP4を選択してください')
+      return
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      setFormError('動画は25MB以下にしてください')
+      return
+    }
+    setUploadingTemplateVideo(true)
+    setFormError('')
+    try {
+      const client = createLineHarnessClient()
+      const uploaded = await client.images.upload({
+        data: await fileToDataUrl(file),
+        mimeType: file.type,
+        filename: file.name,
+      })
+      const next = { ...videoDraft, originalContentUrl: uploaded.url }
+      setVideoDraft(next)
+      updateVideoMessageContent(next)
+    } catch {
+      setFormError('動画アップロードに失敗しました。R2 bindingとWorker URLを確認してください')
+    } finally {
+      setUploadingTemplateVideo(false)
+    }
+  }
+
+  const handleTemplateVideoPreviewUpload = async (file: File | undefined) => {
+    if (!file) return
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      setFormError('プレビュー画像はPNG/JPEGを選択してください')
+      return
+    }
+    if (file.size > 1024 * 1024) {
+      setFormError('プレビュー画像は1MB以下にしてください')
+      return
+    }
+    setUploadingTemplateVideo(true)
+    setFormError('')
+    try {
+      const client = createLineHarnessClient()
+      const uploaded = await client.images.upload({
+        data: await fileToDataUrl(file),
+        mimeType: file.type,
+        filename: file.name,
+      })
+      const next = { ...videoDraft, previewImageUrl: uploaded.url }
+      setVideoDraft(next)
+      updateVideoMessageContent(next)
+    } catch {
+      setFormError('プレビュー画像アップロードに失敗しました。R2 bindingとWorker URLを確認してください')
+    } finally {
+      setUploadingTemplateVideo(false)
     }
   }
 
@@ -705,6 +783,7 @@ export default function TemplatesPage() {
                   }}
                 >
                   <option value="flex">Flexカード</option>
+                  <option value="video">動画</option>
                   <option value="text">テキスト</option>
                   <option value="image">画像</option>
                 </select>
@@ -864,6 +943,63 @@ export default function TemplatesPage() {
                     />
                   </details>
                 </div>
+              ) : form.messageType === 'video' ? (
+                <div className="space-y-4 rounded-lg border border-blue-100 bg-blue-50 p-4">
+                  <div>
+                    <p className="text-xs font-bold text-blue-900">動画テンプレート</p>
+                    <p className="mt-1 text-xs leading-5 text-blue-800">
+                      MP4動画とプレビュー画像をアップロードします。LINEにはvideo message objectとして送信されます。
+                    </p>
+                  </div>
+                  <Field label="動画ファイル MP4 25MB以下">
+                    <input
+                      type="file"
+                      accept="video/mp4"
+                      disabled={uploadingTemplateVideo}
+                      onChange={(e) => void handleTemplateVideoUpload(e.target.files?.[0])}
+                      className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:font-medium file:text-blue-700 disabled:opacity-50"
+                    />
+                  </Field>
+                  <Field label="プレビュー画像 PNG/JPEG 1MB以下">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg"
+                      disabled={uploadingTemplateVideo}
+                      onChange={(e) => void handleTemplateVideoPreviewUpload(e.target.files?.[0])}
+                      className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:font-medium file:text-blue-700 disabled:opacity-50"
+                    />
+                  </Field>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="動画URL">
+                      <input
+                        value={videoDraft.originalContentUrl}
+                        onChange={(e) => {
+                          const next = { ...videoDraft, originalContentUrl: e.target.value }
+                          setVideoDraft(next)
+                          updateVideoMessageContent(next)
+                        }}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        placeholder="https://..."
+                      />
+                    </Field>
+                    <Field label="プレビュー画像URL">
+                      <input
+                        value={videoDraft.previewImageUrl}
+                        onChange={(e) => {
+                          const next = { ...videoDraft, previewImageUrl: e.target.value }
+                          setVideoDraft(next)
+                          updateVideoMessageContent(next)
+                        }}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        placeholder="https://..."
+                      />
+                    </Field>
+                  </div>
+                  <details className="rounded-lg border border-gray-200 bg-white p-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-gray-700">生成されるJSON</summary>
+                    <textarea readOnly value={form.messageContent} rows={6} className="mt-3 w-full rounded-lg border border-gray-200 bg-gray-50 p-3 font-mono text-xs text-gray-700" />
+                  </details>
+                </div>
               ) : (
                 <Field label={form.messageType === 'image' ? '画像URL' : 'メッセージ内容'}>
                   <textarea
@@ -899,6 +1035,8 @@ export default function TemplatesPage() {
               <p className="mb-2 text-xs font-medium text-gray-600">プレビュー</p>
               {form.messageType === 'flex' ? (
                 <FlexPreviewComponent content={useJsonEditor ? form.messageContent : generatedFlexJson} maxWidth={flexDraft.size === 'giga' ? 340 : flexDraft.size === 'kilo' ? 260 : 300} />
+              ) : form.messageType === 'video' && form.messageContent.trim() ? (
+                <FlexPreviewComponent content={form.messageContent} maxWidth={300} />
               ) : form.messageType === 'image' && form.messageContent.trim() ? (
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                   <img src={form.messageContent.trim()} alt="画像テンプレート" className="max-h-64 rounded-lg object-contain" />

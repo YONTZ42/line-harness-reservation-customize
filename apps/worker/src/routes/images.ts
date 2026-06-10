@@ -4,7 +4,7 @@ import { workerBaseUrl } from '../services/line-bindings.js';
 
 const images = new Hono<Env>();
 
-// POST /api/images — upload image (base64 or binary)
+// POST /api/images — upload media (base64 or binary)
 images.post('/api/images', async (c) => {
   try {
     const contentType = c.req.header('Content-Type') || '';
@@ -42,13 +42,14 @@ images.post('/api/images', async (c) => {
       mimeType = contentType.split(';')[0] || 'image/png';
     }
 
-    if (data.byteLength > 5 * 1024 * 1024) {
-      return c.json({ success: false, error: 'Image too large (max 5MB)' }, 400);
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'video/mp4'];
+    if (!allowedTypes.includes(mimeType)) {
+      return c.json({ success: false, error: `Unsupported media type: ${mimeType}. Allowed: ${allowedTypes.join(', ')}` }, 400);
     }
 
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-    if (!allowedTypes.includes(mimeType)) {
-      return c.json({ success: false, error: `Unsupported image type: ${mimeType}. Allowed: ${allowedTypes.join(', ')}` }, 400);
+    const maxBytes = mimeType === 'video/mp4' ? 25 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (data.byteLength > maxBytes) {
+      return c.json({ success: false, error: `Media too large (max ${mimeType === 'video/mp4' ? '25MB' : '5MB'})` }, 400);
     }
 
     const ext = mimeType.split('/')[1] === 'jpeg' ? 'jpg' : mimeType.split('/')[1];
@@ -73,7 +74,7 @@ images.post('/api/images', async (c) => {
   }
 });
 
-// GET /images/:key — serve image (public, no auth)
+// GET /images/:key — serve media (public, no auth)
 images.get('/images/:key', async (c) => {
   const key = c.req.param('key');
   const object = await c.env.IMAGES.get(key);

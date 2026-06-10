@@ -256,6 +256,17 @@ export default function FlexPreview({ content, maxWidth }: { content: string; ma
               if (message.type === 'image' && message.originalContentUrl) {
                 return <img key={index} src={message.originalContentUrl} alt="" style={{ maxWidth: maxWidth || 300, maxHeight: 220, objectFit: 'contain', borderRadius: 8 }} />
               }
+              if (message.type === 'video' && message.originalContentUrl) {
+                return (
+                  <video
+                    key={index}
+                    src={message.originalContentUrl}
+                    poster={message.previewImageUrl}
+                    controls
+                    style={{ maxWidth: maxWidth || 300, maxHeight: 240, borderRadius: 8, backgroundColor: '#111' }}
+                  />
+                )
+              }
               if (message.type === 'text') {
                 return <div key={index} className="rounded-lg bg-[#8FE1B8] p-3 text-sm font-semibold text-gray-900">{message.text || ''}</div>
               }
