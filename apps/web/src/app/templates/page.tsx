@@ -50,6 +50,19 @@ interface VideoDraftState {
   previewImageUrl: string
 }
 
+type MessageObjectKind = 'text' | 'image' | 'video' | 'flex'
+
+interface MessageObjectDraft {
+  id: string
+  type: MessageObjectKind
+  text: string
+  imageUrl: string
+  previewImageUrl: string
+  videoUrl: string
+  videoPreviewImageUrl: string
+  flex: FlexBubbleDraft
+}
+
 const emptyFlexBubble = (): FlexBubbleDraft => ({
   title: '新しいお知らせ',
   body: '本文を入力してください。',
@@ -64,6 +77,17 @@ const initialFlexDraft = (): FlexDraftState => ({
   primaryColor: '#06C755',
   deliveryShape: 'carousel',
   bubbles: [emptyFlexBubble()],
+})
+
+const emptyMessageObject = (type: MessageObjectKind = 'text'): MessageObjectDraft => ({
+  id: crypto.randomUUID(),
+  type,
+  text: 'メッセージ本文を入力してください。',
+  imageUrl: '',
+  previewImageUrl: '',
+  videoUrl: '',
+  videoPreviewImageUrl: '',
+  flex: emptyFlexBubble(),
 })
 
 function formatDate(iso: string): string {
@@ -131,6 +155,8 @@ export default function TemplatesPage() {
   const [uploadingTemplateVideo, setUploadingTemplateVideo] = useState(false)
   const [flexDraft, setFlexDraft] = useState<FlexDraftState>(initialFlexDraft)
   const [videoDraft, setVideoDraft] = useState<VideoDraftState>({ originalContentUrl: '', previewImageUrl: '' })
+  const [messageDrafts, setMessageDrafts] = useState<MessageObjectDraft[]>([emptyMessageObject()])
+  const [activeMessageIndex, setActiveMessageIndex] = useState(0)
   const [activeBubbleIndex, setActiveBubbleIndex] = useState(0)
   const [useJsonEditor, setUseJsonEditor] = useState(false)
   const [providerConfig, setProviderConfig] = useState<ApiProviderConfig | null>(null)
@@ -180,6 +206,7 @@ export default function TemplatesPage() {
   )
 
   const generatedFlexJson = buildCustomFlexMessage(flexDraft)
+  const generatedMessagesJson = buildLineMessagesTemplate(messageDrafts, flexDraft.size, flexDraft.primaryColor)
 
   useEffect(() => {
     if (!showCreate || form.messageType !== 'flex' || useJsonEditor) return
@@ -188,6 +215,14 @@ export default function TemplatesPage() {
       messageContent: generatedFlexJson,
     })
   }, [showCreate, form.messageType, generatedFlexJson, useJsonEditor])
+
+  useEffect(() => {
+    if (!showCreate || form.messageType !== 'messages' || useJsonEditor) return
+    setForm((current) => current.messageContent === generatedMessagesJson ? current : {
+      ...current,
+      messageContent: generatedMessagesJson,
+    })
+  }, [showCreate, form.messageType, generatedMessagesJson, useJsonEditor])
 
   const handleCreate = async () => {
     if (!form.name.trim()) {
@@ -209,13 +244,15 @@ export default function TemplatesPage() {
       await client.templates.create({
         name: form.name,
         category: form.category,
-        messageType: (form.messageType === 'video' ? 'flex' : form.messageType) as 'text' | 'image' | 'flex',
+        messageType: (form.messageType === 'video' || form.messageType === 'messages' ? 'flex' : form.messageType) as 'text' | 'image' | 'flex',
         messageContent: form.messageContent,
       })
       setShowCreate(false)
       setForm({ name: '', category: '', messageType: 'text', messageContent: '' })
       setFlexDraft(initialFlexDraft())
       setVideoDraft({ originalContentUrl: '', previewImageUrl: '' })
+      setMessageDrafts([emptyMessageObject()])
+      setActiveMessageIndex(0)
       setActiveBubbleIndex(0)
       setUseJsonEditor(false)
       await load()
@@ -444,6 +481,73 @@ export default function TemplatesPage() {
       updateVideoMessageContent(next)
     } catch {
       setFormError('プレビュー画像アップロードに失敗しました。R2 bindingとWorker URLを確認してください')
+    } finally {
+      setUploadingTemplateVideo(false)
+    }
+  }
+
+  const updateMessageDraft = (id: string, updates: Partial<MessageObjectDraft>) => {
+    setMessageDrafts((current) => current.map((item) => item.id === id ? { ...item, ...updates } : item))
+  }
+
+  const updateMessageFlex = (id: string, updates: Partial<FlexBubbleDraft>) => {
+    setMessageDrafts((current) => current.map((item) => (
+      item.id === id ? { ...item, flex: { ...item.flex, ...updates } } : item
+    )))
+  }
+
+  const addMessageDraft = () => {
+    setMessageDrafts((current) => {
+      if (current.length >= 5) return current
+      const next = [...current, emptyMessageObject()]
+      setActiveMessageIndex(next.length - 1)
+      return next
+    })
+  }
+
+  const removeMessageDraft = (id: string) => {
+    setMessageDrafts((current) => {
+      if (current.length <= 1) return current
+      const next = current.filter((item) => item.id !== id)
+      setActiveMessageIndex(Math.max(0, Math.min(activeMessageIndex, next.length - 1)))
+      return next
+    })
+  }
+
+  const handleMessageObjectMediaUpload = async (
+    file: File | undefined,
+    id: string,
+    target: 'image' | 'imagePreview' | 'video' | 'videoPreview' | 'flexImage',
+  ) => {
+    if (!file) return
+    const isVideo = target === 'video'
+    const isPreviewImage = target === 'imagePreview' || target === 'videoPreview'
+    const allowed = isVideo ? ['video/mp4'] : ['image/png', 'image/jpeg', ...(target === 'image' || target === 'flexImage' ? ['image/gif', 'image/webp'] : [])]
+    if (!allowed.includes(file.type)) {
+      setFormError(isVideo ? '動画はMP4を選択してください' : '画像形式が対応していません')
+      return
+    }
+    const maxBytes = isVideo ? 25 * 1024 * 1024 : isPreviewImage ? 1024 * 1024 : 5 * 1024 * 1024
+    if (file.size > maxBytes) {
+      setFormError(isVideo ? '動画は25MB以下にしてください' : isPreviewImage ? 'プレビュー画像は1MB以下にしてください' : '画像は5MB以下にしてください')
+      return
+    }
+    setUploadingTemplateVideo(true)
+    setFormError('')
+    try {
+      const client = createLineHarnessClient()
+      const uploaded = await client.images.upload({
+        data: await fileToDataUrl(file),
+        mimeType: file.type,
+        filename: file.name,
+      })
+      if (target === 'image') updateMessageDraft(id, { imageUrl: uploaded.url, previewImageUrl: uploaded.url })
+      if (target === 'imagePreview') updateMessageDraft(id, { previewImageUrl: uploaded.url })
+      if (target === 'video') updateMessageDraft(id, { videoUrl: uploaded.url })
+      if (target === 'videoPreview') updateMessageDraft(id, { videoPreviewImageUrl: uploaded.url })
+      if (target === 'flexImage') updateMessageFlex(id, { imageUrl: uploaded.url })
+    } catch {
+      setFormError('アップロードに失敗しました。R2 bindingとWorker URLを確認してください')
     } finally {
       setUploadingTemplateVideo(false)
     }
@@ -778,10 +882,15 @@ export default function TemplatesPage() {
                   value={form.messageType}
                   onChange={(e) => {
                     const messageType = e.target.value
-                    setForm({ ...form, messageType, messageContent: messageType === 'flex' ? generatedFlexJson : '' })
+                    setForm({
+                      ...form,
+                      messageType,
+                      messageContent: messageType === 'flex' ? generatedFlexJson : messageType === 'messages' ? generatedMessagesJson : '',
+                    })
                     setUseJsonEditor(false)
                   }}
                 >
+                  <option value="messages">複数メッセージ</option>
                   <option value="flex">Flexカード</option>
                   <option value="video">動画</option>
                   <option value="text">テキスト</option>
@@ -789,7 +898,147 @@ export default function TemplatesPage() {
                 </select>
               </Field>
 
-              {form.messageType === 'flex' ? (
+              {form.messageType === 'messages' ? (
+                <div className="space-y-4 rounded-lg border border-indigo-100 bg-indigo-50 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-bold text-indigo-900">LINE messages配列</p>
+                      <p className="mt-1 text-xs text-indigo-800">1回の送信に最大5つのmessage objectを入れられます。</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addMessageDraft}
+                      disabled={messageDrafts.length >= 5}
+                      className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-indigo-700 disabled:opacity-50"
+                    >
+                      メッセージ追加
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {messageDrafts.map((message, index) => (
+                      <button
+                        key={message.id}
+                        type="button"
+                        onClick={() => setActiveMessageIndex(index)}
+                        className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                          activeMessageIndex === index ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700'
+                        }`}
+                      >
+                        {index + 1}. {message.type}
+                      </button>
+                    ))}
+                  </div>
+                  {(() => {
+                    const active = messageDrafts[activeMessageIndex] ?? messageDrafts[0]
+                    if (!active) return null
+                    return (
+                      <div className="space-y-4 rounded-lg border border-indigo-100 bg-white p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <Field label="message object種別">
+                            <select
+                              value={active.type}
+                              onChange={(e) => updateMessageDraft(active.id, { type: e.target.value as MessageObjectKind })}
+                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                            >
+                              <option value="text">text</option>
+                              <option value="image">image</option>
+                              <option value="video">video</option>
+                              <option value="flex">flex bubble</option>
+                            </select>
+                          </Field>
+                          <button
+                            type="button"
+                            onClick={() => removeMessageDraft(active.id)}
+                            disabled={messageDrafts.length <= 1}
+                            className="mt-5 rounded-md bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 disabled:opacity-50"
+                          >
+                            削除
+                          </button>
+                        </div>
+                        {active.type === 'text' && (
+                          <Field label="テキスト">
+                            <textarea
+                              value={active.text}
+                              onChange={(e) => updateMessageDraft(active.id, { text: e.target.value })}
+                              rows={4}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            />
+                          </Field>
+                        )}
+                        {active.type === 'image' && (
+                          <div className="space-y-3">
+                            <Field label="画像アップロード">
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/gif,image/webp"
+                                disabled={uploadingTemplateVideo}
+                                onChange={(e) => void handleMessageObjectMediaUpload(e.target.files?.[0], active.id, 'image')}
+                                className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-xs file:font-medium file:text-indigo-700 disabled:opacity-50"
+                              />
+                            </Field>
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <Field label="画像URL">
+                                <input value={active.imageUrl} onChange={(e) => updateMessageDraft(active.id, { imageUrl: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                              </Field>
+                              <Field label="プレビュー画像URL">
+                                <input value={active.previewImageUrl} onChange={(e) => updateMessageDraft(active.id, { previewImageUrl: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                              </Field>
+                            </div>
+                          </div>
+                        )}
+                        {active.type === 'video' && (
+                          <div className="space-y-3">
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <Field label="MP4アップロード">
+                                <input type="file" accept="video/mp4" disabled={uploadingTemplateVideo} onChange={(e) => void handleMessageObjectMediaUpload(e.target.files?.[0], active.id, 'video')} className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-xs file:font-medium file:text-indigo-700 disabled:opacity-50" />
+                              </Field>
+                              <Field label="プレビュー画像アップロード">
+                                <input type="file" accept="image/png,image/jpeg" disabled={uploadingTemplateVideo} onChange={(e) => void handleMessageObjectMediaUpload(e.target.files?.[0], active.id, 'videoPreview')} className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-xs file:font-medium file:text-indigo-700 disabled:opacity-50" />
+                              </Field>
+                            </div>
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <Field label="動画URL">
+                                <input value={active.videoUrl} onChange={(e) => updateMessageDraft(active.id, { videoUrl: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                              </Field>
+                              <Field label="プレビュー画像URL">
+                                <input value={active.videoPreviewImageUrl} onChange={(e) => updateMessageDraft(active.id, { videoPreviewImageUrl: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                              </Field>
+                            </div>
+                          </div>
+                        )}
+                        {active.type === 'flex' && (
+                          <div className="space-y-3">
+                            <Field label="画像アップロード">
+                              <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" disabled={uploadingTemplateVideo} onChange={(e) => void handleMessageObjectMediaUpload(e.target.files?.[0], active.id, 'flexImage')} className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-xs file:font-medium file:text-indigo-700 disabled:opacity-50" />
+                            </Field>
+                            <Field label="画像URL">
+                              <input value={active.flex.imageUrl} onChange={(e) => updateMessageFlex(active.id, { imageUrl: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                            </Field>
+                            <Field label="タイトル">
+                              <input value={active.flex.title} onChange={(e) => updateMessageFlex(active.id, { title: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                            </Field>
+                            <Field label="本文">
+                              <textarea value={active.flex.body} onChange={(e) => updateMessageFlex(active.id, { body: e.target.value })} rows={3} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                            </Field>
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <Field label="ボタン表示">
+                                <input value={active.flex.buttonLabel} onChange={(e) => updateMessageFlex(active.id, { buttonLabel: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                              </Field>
+                              <Field label="ボタンURL">
+                                <input value={active.flex.buttonUrl} onChange={(e) => updateMessageFlex(active.id, { buttonUrl: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                              </Field>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
+                  <details className="rounded-lg border border-gray-200 bg-white p-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-gray-700">生成されるJSON</summary>
+                    <textarea readOnly value={generatedMessagesJson} rows={10} className="mt-3 w-full rounded-lg border border-gray-200 bg-gray-50 p-3 font-mono text-xs text-gray-700" />
+                  </details>
+                </div>
+              ) : form.messageType === 'flex' ? (
                 <div className="space-y-4 rounded-lg border border-green-100 bg-green-50 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
@@ -1035,6 +1284,8 @@ export default function TemplatesPage() {
               <p className="mb-2 text-xs font-medium text-gray-600">プレビュー</p>
               {form.messageType === 'flex' ? (
                 <FlexPreviewComponent content={useJsonEditor ? form.messageContent : generatedFlexJson} maxWidth={flexDraft.size === 'giga' ? 340 : flexDraft.size === 'kilo' ? 260 : 300} />
+              ) : form.messageType === 'messages' ? (
+                <FlexPreviewComponent content={generatedMessagesJson} maxWidth={300} />
               ) : form.messageType === 'video' && form.messageContent.trim() ? (
                 <FlexPreviewComponent content={form.messageContent} maxWidth={300} />
               ) : form.messageType === 'image' && form.messageContent.trim() ? (
@@ -1224,6 +1475,36 @@ function buildCustomFlexMessage(input: FlexDraftState): string {
     ? bubbles[0]
     : { type: 'carousel', contents: bubbles }
   return JSON.stringify(contents, null, 2)
+}
+
+function buildLineMessagesTemplate(items: MessageObjectDraft[], size: FlexDraftState['size'], primaryColor: string): string {
+  const messages = items.slice(0, 5).map((item, index) => {
+    if (item.type === 'image') {
+      const originalContentUrl = item.imageUrl.trim()
+      const previewImageUrl = item.previewImageUrl.trim() || originalContentUrl
+      return { type: 'image', originalContentUrl, previewImageUrl }
+    }
+
+    if (item.type === 'video') {
+      return {
+        type: 'video',
+        originalContentUrl: item.videoUrl.trim(),
+        previewImageUrl: item.videoPreviewImageUrl.trim(),
+      }
+    }
+
+    if (item.type === 'flex') {
+      return {
+        type: 'flex',
+        altText: item.flex.title.trim() || `Flex ${index + 1}`,
+        contents: buildCustomFlexBubble(item.flex, size, primaryColor),
+      }
+    }
+
+    return { type: 'text', text: item.text.trim() || ' ' }
+  })
+
+  return JSON.stringify(messages, null, 2)
 }
 
 function buildCustomFlexBubble(input: FlexBubbleDraft, size: FlexDraftState['size'], primaryColor: string): Record<string, unknown> {
