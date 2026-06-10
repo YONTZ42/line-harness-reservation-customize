@@ -6,7 +6,7 @@ name: Migrate D1
 # Optional GitHub Variables:
 # - CLOUDFLARE_ACCOUNT_ID        can be a Secret or Variable
 # - CLOUDFLARE_D1_DATABASE_ID    can be a Secret or Variable
-# - CLOUDFLARE_D1_DATABASE_NAME   default: line-crm
+# - CLOUDFLARE_D1_DATABASE_NAME
 
 
 on:
@@ -59,7 +59,7 @@ jobs:
         env:
           CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
           CF_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID || vars.CLOUDFLARE_D1_DATABASE_ID }}
-          CF_D1_DATABASE_NAME: ${{ inputs.database_name || vars.CLOUDFLARE_D1_DATABASE_NAME || 'line-crm' }}
+          CF_D1_DATABASE_NAME: ${{ inputs.database_name || vars.CLOUDFLARE_D1_DATABASE_NAME }}
           MIGRATION_FILE: ${{ inputs.migration_file }}
         run: |
           node <<'NODE'
@@ -68,11 +68,12 @@ jobs:
 
           const accountId = process.env.CF_ACCOUNT_ID?.trim();
           const databaseId = process.env.CF_D1_DATABASE_ID?.trim();
-          const databaseName = process.env.CF_D1_DATABASE_NAME?.trim() || 'line-crm';
+          const databaseName = process.env.CF_D1_DATABASE_NAME?.trim();
           const migrationFile = process.env.MIGRATION_FILE?.trim();
 
           if (!accountId) throw new Error('CF_ACCOUNT_ID is required');
           if (!databaseId) throw new Error('CF_D1_DATABASE_ID is required');
+          if (!databaseName) throw new Error('CF_D1_DATABASE_NAME is required');
           if (!migrationFile) throw new Error('migration_file is required');
           const isSchemaFile = migrationFile === 'packages/db/schema.sql';
           const isMigrationFile = migrationFile.startsWith('packages/db/migrations/');
@@ -127,7 +128,7 @@ jobs:
       - name: Upload D1 backup artifact
         uses: actions/upload-artifact@v4
         with:
-          name: d1-backup-${{ inputs.database_name || vars.CLOUDFLARE_D1_DATABASE_NAME || 'line-crm' }}-${{ github.run_id }}
+          name: d1-backup-${{ inputs.database_name || vars.CLOUDFLARE_D1_DATABASE_NAME }}-${{ github.run_id }}
           path: backups/d1/*.sql
           if-no-files-found: error
           retention-days: 14
