@@ -40,6 +40,8 @@ images.post('/api/images', async (c) => {
     } else {
       data = await c.req.arrayBuffer();
       mimeType = contentType.split(';')[0] || 'image/png';
+      const headerFilename = c.req.header('X-Filename');
+      filename = headerFilename ? decodeURIComponent(headerFilename) : undefined;
     }
 
     const allowedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'video/mp4'];

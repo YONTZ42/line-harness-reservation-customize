@@ -447,7 +447,7 @@ export default function RichMenusPage() {
       })
       if (!draftImage) throw new Error('画像を選択してください')
       const uploaded = await client.images.upload({
-        data: draftImage.dataUrl,
+        body: draftImage.file,
         mimeType: draftImage.contentType,
         filename: draftImage.file.name,
       })
@@ -502,7 +502,7 @@ export default function RichMenusPage() {
       const image = await fileToDataUrl(file)
       const client = createLineHarnessClient(selectedAccountId)
       const uploaded = await client.images.upload({
-        data: image,
+        body: file,
         mimeType: file.type,
         filename: file.name,
       })

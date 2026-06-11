@@ -496,7 +496,9 @@ export interface UploadedImage {
 
 export interface UploadImageInput {
   /** Base64-encoded image data (with or without data URI prefix) */
-  data: string
+  data?: string
+  /** Binary media body. Prefer this in browsers to avoid base64 overhead. */
+  body?: Blob | ArrayBuffer | Uint8Array
   /** MIME type, e.g. "image/png". Defaults to "image/png" */
   mimeType?: string
   /** Optional original filename */

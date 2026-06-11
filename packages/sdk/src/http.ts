@@ -61,7 +61,14 @@ export class HttpClient {
     }
 
     if (body !== undefined) {
-      options.body = JSON.stringify(body)
+      if (isRawBody(body)) {
+        options.body = body as BodyInit
+        if (!extraHeaders?.['Content-Type'] && !extraHeaders?.['content-type']) {
+          delete headers['Content-Type']
+        }
+      } else {
+        options.body = JSON.stringify(body)
+      }
     }
 
     const res = await fetch(url, options)
@@ -79,4 +86,15 @@ export class HttpClient {
 
     return res.json() as Promise<T>
   }
+}
+
+function isRawBody(body: unknown): body is BodyInit {
+  return (
+    body instanceof ArrayBuffer ||
+    ArrayBuffer.isView(body) ||
+    (typeof Blob !== 'undefined' && body instanceof Blob) ||
+    (typeof FormData !== 'undefined' && body instanceof FormData) ||
+    (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) ||
+    (typeof ReadableStream !== 'undefined' && body instanceof ReadableStream)
+  )
 }
