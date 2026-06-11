@@ -74,6 +74,24 @@ images.post('/api/images', async (c) => {
   }
 });
 
+// GET /images/imagemap/:key/:size — serve an imagemap base image variant.
+// LINE requests `${baseUrl}/{width}`. We reuse the uploaded base image for each size.
+images.get('/images/imagemap/:key/:size', async (c) => {
+  const key = c.req.param('key');
+  const object = await c.env.IMAGES.get(key);
+
+  if (!object) {
+    return c.json({ success: false, error: 'Image not found' }, 404);
+  }
+
+  const headers = new Headers();
+  headers.set('Content-Type', object.httpMetadata?.contentType || 'image/png');
+  headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  headers.set('ETag', object.etag);
+
+  return new Response(object.body, { headers });
+});
+
 // GET /images/:key — serve media (public, no auth)
 images.get('/images/:key', async (c) => {
   const key = c.req.param('key');

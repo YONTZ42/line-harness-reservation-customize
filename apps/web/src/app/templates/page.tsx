@@ -48,9 +48,12 @@ interface FlexDraftState {
 interface VideoDraftState {
   originalContentUrl: string
   previewImageUrl: string
+  baseUrl: string
+  linkUri: string
+  linkLabel: string
 }
 
-type MessageObjectKind = 'text' | 'image' | 'video' | 'flex'
+type MessageObjectKind = 'text' | 'image' | 'video' | 'imagemapVideo' | 'flex'
 
 interface MessageObjectDraft {
   id: string
@@ -60,6 +63,9 @@ interface MessageObjectDraft {
   previewImageUrl: string
   videoUrl: string
   videoPreviewImageUrl: string
+  imagemapBaseUrl: string
+  imagemapLinkUri: string
+  imagemapLinkLabel: string
   flex: FlexBubbleDraft
 }
 
@@ -87,6 +93,9 @@ const emptyMessageObject = (type: MessageObjectKind = 'text'): MessageObjectDraf
   previewImageUrl: '',
   videoUrl: '',
   videoPreviewImageUrl: '',
+  imagemapBaseUrl: '',
+  imagemapLinkUri: '',
+  imagemapLinkLabel: '詳しく見る',
   flex: emptyFlexBubble(),
 })
 
@@ -154,7 +163,7 @@ export default function TemplatesPage() {
   const [uploadingTemplateImage, setUploadingTemplateImage] = useState(false)
   const [uploadingTemplateVideo, setUploadingTemplateVideo] = useState(false)
   const [flexDraft, setFlexDraft] = useState<FlexDraftState>(initialFlexDraft)
-  const [videoDraft, setVideoDraft] = useState<VideoDraftState>({ originalContentUrl: '', previewImageUrl: '' })
+  const [videoDraft, setVideoDraft] = useState<VideoDraftState>({ originalContentUrl: '', previewImageUrl: '', baseUrl: '', linkUri: '', linkLabel: '詳しく見る' })
   const [messageDrafts, setMessageDrafts] = useState<MessageObjectDraft[]>([emptyMessageObject()])
   const [activeMessageIndex, setActiveMessageIndex] = useState(0)
   const [activeBubbleIndex, setActiveBubbleIndex] = useState(0)
@@ -244,13 +253,13 @@ export default function TemplatesPage() {
       await client.templates.create({
         name: form.name,
         category: form.category,
-        messageType: (form.messageType === 'video' || form.messageType === 'messages' ? 'flex' : form.messageType) as 'text' | 'image' | 'flex',
+        messageType: (form.messageType === 'video' || form.messageType === 'imagemapVideo' || form.messageType === 'messages' ? 'flex' : form.messageType) as 'text' | 'image' | 'flex',
         messageContent: form.messageContent,
       })
       setShowCreate(false)
       setForm({ name: '', category: '', messageType: 'text', messageContent: '' })
       setFlexDraft(initialFlexDraft())
-      setVideoDraft({ originalContentUrl: '', previewImageUrl: '' })
+      setVideoDraft({ originalContentUrl: '', previewImageUrl: '', baseUrl: '', linkUri: '', linkLabel: '詳しく見る' })
       setMessageDrafts([emptyMessageObject()])
       setActiveMessageIndex(0)
       setActiveBubbleIndex(0)
@@ -420,9 +429,16 @@ export default function TemplatesPage() {
   const updateVideoMessageContent = (draft: VideoDraftState) => {
     const originalContentUrl = draft.originalContentUrl.trim()
     const previewImageUrl = draft.previewImageUrl.trim()
+    const baseUrl = draft.baseUrl.trim()
+    const linkUri = draft.linkUri.trim()
+    const linkLabel = draft.linkLabel.trim() || '詳しく見る'
     setForm((current) => ({
       ...current,
-      messageContent: originalContentUrl && previewImageUrl
+      messageContent: current.messageType === 'imagemapVideo'
+        ? originalContentUrl && previewImageUrl && baseUrl && linkUri
+          ? JSON.stringify([buildImagemapVideoMessage({ originalContentUrl, previewImageUrl, baseUrl, linkUri, linkLabel })], null, 2)
+          : ''
+        : originalContentUrl && previewImageUrl
         ? JSON.stringify([{ type: 'video', originalContentUrl, previewImageUrl }], null, 2)
         : '',
     }))
@@ -486,6 +502,35 @@ export default function TemplatesPage() {
     }
   }
 
+  const handleTemplateImagemapBaseUpload = async (file: File | undefined) => {
+    if (!file) return
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      setFormError('背景画像はPNG/JPEGを選択してください')
+      return
+    }
+    if (file.size > 1024 * 1024) {
+      setFormError('背景画像は1MB以下にしてください')
+      return
+    }
+    setUploadingTemplateVideo(true)
+    setFormError('')
+    try {
+      const client = createLineHarnessClient()
+      const uploaded = await client.images.upload({
+        data: await fileToDataUrl(file),
+        mimeType: file.type,
+        filename: file.name,
+      })
+      const next = { ...videoDraft, baseUrl: uploaded.url.replace('/images/', '/images/imagemap/') }
+      setVideoDraft(next)
+      updateVideoMessageContent(next)
+    } catch {
+      setFormError('背景画像アップロードに失敗しました。R2 bindingとWorker URLを確認してください')
+    } finally {
+      setUploadingTemplateVideo(false)
+    }
+  }
+
   const updateMessageDraft = (id: string, updates: Partial<MessageObjectDraft>) => {
     setMessageDrafts((current) => current.map((item) => item.id === id ? { ...item, ...updates } : item))
   }
@@ -517,11 +562,11 @@ export default function TemplatesPage() {
   const handleMessageObjectMediaUpload = async (
     file: File | undefined,
     id: string,
-    target: 'image' | 'imagePreview' | 'video' | 'videoPreview' | 'flexImage',
+    target: 'image' | 'imagePreview' | 'video' | 'videoPreview' | 'imagemapBase' | 'flexImage',
   ) => {
     if (!file) return
     const isVideo = target === 'video'
-    const isPreviewImage = target === 'imagePreview' || target === 'videoPreview'
+    const isPreviewImage = target === 'imagePreview' || target === 'videoPreview' || target === 'imagemapBase'
     const allowed = isVideo ? ['video/mp4'] : ['image/png', 'image/jpeg', ...(target === 'image' || target === 'flexImage' ? ['image/gif', 'image/webp'] : [])]
     if (!allowed.includes(file.type)) {
       setFormError(isVideo ? '動画はMP4を選択してください' : '画像形式が対応していません')
@@ -545,6 +590,7 @@ export default function TemplatesPage() {
       if (target === 'imagePreview') updateMessageDraft(id, { previewImageUrl: uploaded.url })
       if (target === 'video') updateMessageDraft(id, { videoUrl: uploaded.url })
       if (target === 'videoPreview') updateMessageDraft(id, { videoPreviewImageUrl: uploaded.url })
+      if (target === 'imagemapBase') updateMessageDraft(id, { imagemapBaseUrl: uploaded.url.replace('/images/', '/images/imagemap/') })
       if (target === 'flexImage') updateMessageFlex(id, { imageUrl: uploaded.url })
     } catch {
       setFormError('アップロードに失敗しました。R2 bindingとWorker URLを確認してください')
@@ -893,6 +939,7 @@ export default function TemplatesPage() {
                   <option value="messages">複数メッセージ</option>
                   <option value="flex">Flexカード</option>
                   <option value="video">動画</option>
+                  <option value="imagemapVideo">動画＋再生後リンク</option>
                   <option value="text">テキスト</option>
                   <option value="image">画像</option>
                 </select>
@@ -943,6 +990,7 @@ export default function TemplatesPage() {
                               <option value="text">text</option>
                               <option value="image">image</option>
                               <option value="video">video</option>
+                              <option value="imagemapVideo">video + end link</option>
                               <option value="flex">flex bubble</option>
                             </select>
                           </Field>
@@ -986,8 +1034,13 @@ export default function TemplatesPage() {
                             </div>
                           </div>
                         )}
-                        {active.type === 'video' && (
+                        {(active.type === 'video' || active.type === 'imagemapVideo') && (
                           <div className="space-y-3">
+                            {active.type === 'imagemapVideo' && (
+                              <Field label="背景画像アップロード">
+                                <input type="file" accept="image/png,image/jpeg" disabled={uploadingTemplateVideo} onChange={(e) => void handleMessageObjectMediaUpload(e.target.files?.[0], active.id, 'imagemapBase')} className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-xs file:font-medium file:text-indigo-700 disabled:opacity-50" />
+                              </Field>
+                            )}
                             <div className="grid gap-4 sm:grid-cols-2">
                               <Field label="MP4アップロード">
                                 <input type="file" accept="video/mp4" disabled={uploadingTemplateVideo} onChange={(e) => void handleMessageObjectMediaUpload(e.target.files?.[0], active.id, 'video')} className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-xs file:font-medium file:text-indigo-700 disabled:opacity-50" />
@@ -1004,6 +1057,21 @@ export default function TemplatesPage() {
                                 <input value={active.videoPreviewImageUrl} onChange={(e) => updateMessageDraft(active.id, { videoPreviewImageUrl: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
                               </Field>
                             </div>
+                            {active.type === 'imagemapVideo' && (
+                              <>
+                                <Field label="imagemap baseUrl">
+                                  <input value={active.imagemapBaseUrl} onChange={(e) => updateMessageDraft(active.id, { imagemapBaseUrl: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                                </Field>
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                  <Field label="再生後リンクURL">
+                                    <input value={active.imagemapLinkUri} onChange={(e) => updateMessageDraft(active.id, { imagemapLinkUri: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                                  </Field>
+                                  <Field label="再生後リンク表示">
+                                    <input value={active.imagemapLinkLabel} onChange={(e) => updateMessageDraft(active.id, { imagemapLinkLabel: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                                  </Field>
+                                </div>
+                              </>
+                            )}
                           </div>
                         )}
                         {active.type === 'flex' && (
@@ -1192,14 +1260,27 @@ export default function TemplatesPage() {
                     />
                   </details>
                 </div>
-              ) : form.messageType === 'video' ? (
+              ) : form.messageType === 'video' || form.messageType === 'imagemapVideo' ? (
                 <div className="space-y-4 rounded-lg border border-blue-100 bg-blue-50 p-4">
                   <div>
-                    <p className="text-xs font-bold text-blue-900">動画テンプレート</p>
+                    <p className="text-xs font-bold text-blue-900">{form.messageType === 'imagemapVideo' ? '動画＋再生後リンク' : '動画テンプレート'}</p>
                     <p className="mt-1 text-xs leading-5 text-blue-800">
-                      MP4動画とプレビュー画像をアップロードします。LINEにはvideo message objectとして送信されます。
+                      {form.messageType === 'imagemapVideo'
+                        ? '動画付きimagemapとして送信し、動画再生後にリンクボタンを表示します。'
+                        : 'MP4動画とプレビュー画像をアップロードします。LINEにはvideo message objectとして送信されます。'}
                     </p>
                   </div>
+                  {form.messageType === 'imagemapVideo' && (
+                    <Field label="背景画像 PNG/JPEG 1MB以下">
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg"
+                        disabled={uploadingTemplateVideo}
+                        onChange={(e) => void handleTemplateImagemapBaseUpload(e.target.files?.[0])}
+                        className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:font-medium file:text-blue-700 disabled:opacity-50"
+                      />
+                    </Field>
+                  )}
                   <Field label="動画ファイル MP4 25MB以下">
                     <input
                       type="file"
@@ -1244,6 +1325,48 @@ export default function TemplatesPage() {
                       />
                     </Field>
                   </div>
+                  {form.messageType === 'imagemapVideo' && (
+                    <>
+                      <Field label="imagemap baseUrl">
+                        <input
+                          value={videoDraft.baseUrl}
+                          onChange={(e) => {
+                            const next = { ...videoDraft, baseUrl: e.target.value }
+                            setVideoDraft(next)
+                            updateVideoMessageContent(next)
+                          }}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          placeholder="https://.../images/imagemap/<key>"
+                        />
+                      </Field>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="再生後リンクURL">
+                          <input
+                            value={videoDraft.linkUri}
+                            onChange={(e) => {
+                              const next = { ...videoDraft, linkUri: e.target.value }
+                              setVideoDraft(next)
+                              updateVideoMessageContent(next)
+                            }}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            placeholder="https://..."
+                          />
+                        </Field>
+                        <Field label="再生後リンク表示">
+                          <input
+                            value={videoDraft.linkLabel}
+                            onChange={(e) => {
+                              const next = { ...videoDraft, linkLabel: e.target.value }
+                              setVideoDraft(next)
+                              updateVideoMessageContent(next)
+                            }}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            placeholder="詳しく見る"
+                          />
+                        </Field>
+                      </div>
+                    </>
+                  )}
                   <details className="rounded-lg border border-gray-200 bg-white p-3">
                     <summary className="cursor-pointer text-xs font-semibold text-gray-700">生成されるJSON</summary>
                     <textarea readOnly value={form.messageContent} rows={6} className="mt-3 w-full rounded-lg border border-gray-200 bg-gray-50 p-3 font-mono text-xs text-gray-700" />
@@ -1286,7 +1409,7 @@ export default function TemplatesPage() {
                 <FlexPreviewComponent content={useJsonEditor ? form.messageContent : generatedFlexJson} maxWidth={flexDraft.size === 'giga' ? 340 : flexDraft.size === 'kilo' ? 260 : 300} />
               ) : form.messageType === 'messages' ? (
                 <FlexPreviewComponent content={generatedMessagesJson} maxWidth={300} />
-              ) : form.messageType === 'video' && form.messageContent.trim() ? (
+              ) : (form.messageType === 'video' || form.messageType === 'imagemapVideo') && form.messageContent.trim() ? (
                 <FlexPreviewComponent content={form.messageContent} maxWidth={300} />
               ) : form.messageType === 'image' && form.messageContent.trim() ? (
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
@@ -1493,6 +1616,16 @@ function buildLineMessagesTemplate(items: MessageObjectDraft[], size: FlexDraftS
       }
     }
 
+    if (item.type === 'imagemapVideo') {
+      return buildImagemapVideoMessage({
+        originalContentUrl: item.videoUrl.trim(),
+        previewImageUrl: item.videoPreviewImageUrl.trim(),
+        baseUrl: item.imagemapBaseUrl.trim(),
+        linkUri: item.imagemapLinkUri.trim(),
+        linkLabel: item.imagemapLinkLabel.trim() || '詳しく見る',
+      })
+    }
+
     if (item.type === 'flex') {
       return {
         type: 'flex',
@@ -1505,6 +1638,31 @@ function buildLineMessagesTemplate(items: MessageObjectDraft[], size: FlexDraftS
   })
 
   return JSON.stringify(messages, null, 2)
+}
+
+function buildImagemapVideoMessage(input: {
+  originalContentUrl: string
+  previewImageUrl: string
+  baseUrl: string
+  linkUri: string
+  linkLabel: string
+}): Record<string, unknown> {
+  return {
+    type: 'imagemap',
+    baseUrl: input.baseUrl,
+    altText: input.linkLabel || '動画',
+    baseSize: { width: 1040, height: 1040 },
+    video: {
+      originalContentUrl: input.originalContentUrl,
+      previewImageUrl: input.previewImageUrl,
+      area: { x: 0, y: 0, width: 1040, height: 585 },
+      externalLink: {
+        linkUri: input.linkUri,
+        label: input.linkLabel || '詳しく見る',
+      },
+    },
+    actions: [],
+  }
 }
 
 function buildCustomFlexBubble(input: FlexBubbleDraft, size: FlexDraftState['size'], primaryColor: string): Record<string, unknown> {

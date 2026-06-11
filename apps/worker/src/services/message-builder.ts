@@ -11,7 +11,7 @@ function isRecord(value: unknown): value is AnyRecord {
 }
 
 function isLineMessageObject(value: unknown): value is AnyRecord {
-  return isRecord(value) && typeof value.type === 'string' && ['text', 'image', 'video', 'flex'].includes(value.type);
+  return isRecord(value) && typeof value.type === 'string' && ['text', 'image', 'video', 'flex', 'imagemap'].includes(value.type);
 }
 
 function isFlexBubble(value: unknown): value is AnyRecord {
@@ -84,6 +84,10 @@ function messageObjectToLineMessage(input: AnyRecord, altText?: string): Message
       altText: typeof input.altText === 'string' ? input.altText : altText || extractFlexAltText(contents),
       contents,
     };
+  }
+
+  if (input.type === 'imagemap') {
+    return input as unknown as Message;
   }
 
   return null;

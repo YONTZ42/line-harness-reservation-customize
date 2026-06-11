@@ -267,6 +267,25 @@ export default function FlexPreview({ content, maxWidth }: { content: string; ma
                   />
                 )
               }
+              if (message.type === 'imagemap' && message.video) {
+                const video = message.video as FlexNode
+                const externalLink = video.externalLink as { label?: string; linkUri?: string } | undefined
+                return (
+                  <div key={index} className="overflow-hidden rounded-lg border border-gray-200 bg-white" style={{ maxWidth: maxWidth || 300 }}>
+                    <video
+                      src={video.originalContentUrl}
+                      poster={video.previewImageUrl}
+                      controls
+                      style={{ width: '100%', maxHeight: 240, backgroundColor: '#111' }}
+                    />
+                    {externalLink && (
+                      <div className="border-t border-gray-200 p-3 text-sm font-semibold text-blue-600">
+                        {externalLink.label || '詳しく見る'}
+                      </div>
+                    )}
+                  </div>
+                )
+              }
               if (message.type === 'text') {
                 return <div key={index} className="rounded-lg bg-[#8FE1B8] p-3 text-sm font-semibold text-gray-900">{message.text || ''}</div>
               }
