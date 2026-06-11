@@ -101,3 +101,31 @@ export async function getActiveAutomationsByEvent(db: D1Database, eventType: str
     .bind(eventType).all<AutomationRow>();
   return result.results;
 }
+
+/** イベントタイプ + LINEアカウントに一致するアクティブな自動化ルールを取得（優先度順） */
+export async function getActiveAutomationsByEventForAccount(
+  db: D1Database,
+  eventType: string,
+  lineAccountId?: string | null,
+): Promise<AutomationRow[]> {
+  if (!lineAccountId) return getActiveAutomationsByEvent(db, eventType);
+
+  try {
+    const result = await db.prepare(
+      `SELECT * FROM automations
+       WHERE event_type = ?
+         AND is_active = 1
+         AND (line_account_id IS NULL OR line_account_id = ?)
+       ORDER BY priority DESC`,
+    )
+      .bind(eventType, lineAccountId)
+      .all<AutomationRow>();
+    return result.results;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('no such column') && message.includes('line_account_id')) {
+      return getActiveAutomationsByEvent(db, eventType);
+    }
+    throw err;
+  }
+}

@@ -319,7 +319,7 @@ async function handleEvent(
 
     const postbackData = (event as unknown as { postback: { data: string } }).postback.data;
     const postbackParams = parsePostbackData(postbackData);
-    await recordUserEvent(db, {
+    const recordTask = recordUserEvent(db, {
       lineAccountId,
       friendId: friend.id,
       lineUserId: userId,
@@ -336,6 +336,8 @@ async function handleEvent(
     }).catch((err) => {
       console.warn('record rich_menu.tap event failed:', err);
     });
+    if (executionCtx) executionCtx.waitUntil(recordTask);
+    else void recordTask;
 
     await fireEvent(
       db,

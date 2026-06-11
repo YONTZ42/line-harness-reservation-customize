@@ -11,7 +11,7 @@
 import {
   getActiveOutgoingWebhooksByEvent,
   applyScoring,
-  getActiveAutomationsByEvent,
+  getActiveAutomationsByEventForAccount,
   createAutomationLog,
   getActiveNotificationRulesByEvent,
   createNotification,
@@ -147,13 +147,15 @@ async function processAutomations(
   lineAccountId?: string | null,
 ): Promise<void> {
   try {
-    const allAutomations = await getActiveAutomationsByEvent(db, eventType);
-    // Filter by account: match this account's automations + unassigned (backward compat)
-    const automations = allAutomations.filter(
-      (a) => !a.line_account_id || !lineAccountId || a.line_account_id === lineAccountId,
-    );
+    const startedAt = Date.now();
+    const automations = await getActiveAutomationsByEventForAccount(db, eventType, lineAccountId);
+    const fetchMs = Date.now() - startedAt;
+    let parseAndMatchMs = 0;
+    let actionMs = 0;
+    let matchedCount = 0;
 
     for (const automation of automations) {
+      const parseStartedAt = Date.now();
       let conditions: Record<string, unknown>;
       let actions: Array<{ type: string; params: Record<string, string> }>;
       try {
@@ -171,14 +173,19 @@ async function processAutomations(
           actionsResult: JSON.stringify([{ action: 'parse', success: false, error: err instanceof Error ? err.message : String(err) }]),
           status: 'failed',
         });
+        parseAndMatchMs += Date.now() - parseStartedAt;
         continue;
       }
 
       // 条件チェック（簡易版: 条件が空なら常にマッチ）
-      if (!matchConditions(conditions, payload)) continue;
+      const matched = matchConditions(conditions, payload);
+      parseAndMatchMs += Date.now() - parseStartedAt;
+      if (!matched) continue;
+      matchedCount++;
 
       const results: Array<{ action: string; success: boolean; error?: string }> = [];
 
+      const actionStartedAt = Date.now();
       for (const action of actions) {
         try {
           await executeAction(db, action, payload, lineAccessToken);
@@ -188,6 +195,7 @@ async function processAutomations(
           results.push({ action: action.type, success: false, error: errorMsg });
         }
       }
+      actionMs += Date.now() - actionStartedAt;
 
       const allSuccess = results.every((r) => r.success);
       const anySuccess = results.some((r) => r.success);
@@ -199,6 +207,10 @@ async function processAutomations(
         actionsResult: JSON.stringify(results),
         status: allSuccess ? 'success' : anySuccess ? 'partial' : 'failed',
       });
+    }
+    const totalMs = Date.now() - startedAt;
+    if (eventType === 'rich_menu.tap' || totalMs >= 500) {
+      console.log(`[automation] event=${eventType} account=${lineAccountId ?? 'null'} candidates=${automations.length} matched=${matchedCount} fetchMs=${fetchMs} parseMatchMs=${parseAndMatchMs} actionMs=${actionMs} totalMs=${totalMs}`);
     }
   } catch (err) {
     console.error('processAutomations error:', err);
