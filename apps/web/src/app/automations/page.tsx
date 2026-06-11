@@ -249,6 +249,7 @@ export default function AutomationsPage() {
         actions: parsedActions,
         conditions: parsedConditions,
         priority: form.priority,
+        lineAccountId: selectedAccountId || null,
       })
       if (res.success) {
         setShowCreate(false)
@@ -321,6 +322,7 @@ export default function AutomationsPage() {
         actions: parsedActions,
         conditions: parsedConditions,
         priority: editForm.priority,
+        lineAccountId: selectedAccountId || null,
       })
       if (res.success) {
         cancelEdit()
@@ -415,7 +417,7 @@ export default function AutomationsPage() {
                       ? '{\n  "postbackDataContains": "action=reserve"\n}'
                       : form.conditionsJson,
                     actionsJson: eventType === 'rich_menu.tap'
-                      ? '[\n  {\n    "type": "send_message",\n    "params": {\n      "delivery": "reply_only",\n      "messageType": "text",\n      "content": "予約はこちらからお願いします。"\n    }\n  }\n]'
+                      ? '[\n  {\n    "type": "send_message",\n    "params": {\n      "delivery": "reply_preferred",\n      "messageType": "text",\n      "content": "予約はこちらからお願いします。"\n    }\n  }\n]'
                       : form.actionsJson,
                   })
                 }}

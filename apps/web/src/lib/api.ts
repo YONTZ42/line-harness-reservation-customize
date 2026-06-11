@@ -826,12 +826,13 @@ export const api = {
       description?: string | null
       conditions?: Record<string, unknown>
       priority?: number
+      lineAccountId?: string | null
     }) =>
       fetchApi<ApiResponse<Automation>>('/api/automations', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-    update: (id: string, data: Partial<Pick<Automation, 'name' | 'description' | 'eventType' | 'conditions' | 'actions' | 'isActive' | 'priority'>>) =>
+    update: (id: string, data: Partial<Pick<Automation, 'name' | 'description' | 'eventType' | 'conditions' | 'actions' | 'isActive' | 'priority'>> & { lineAccountId?: string | null }) =>
       fetchApi<ApiResponse<Automation>>(`/api/automations/${id}`, {
         method: 'PUT',
         body: JSON.stringify(data),

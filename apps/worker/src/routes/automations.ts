@@ -171,8 +171,19 @@ automations.post('/api/automations', async (c) => {
 automations.put('/api/automations/:id', async (c) => {
   try {
     const id = c.req.param('id');
-    const body = await c.req.json();
-    await updateAutomation(c.env.DB, id, body);
+    const body = await c.req.json<{
+      name?: string;
+      description?: string | null;
+      eventType?: string;
+      conditions?: Record<string, unknown>;
+      actions?: unknown[];
+      isActive?: boolean;
+      priority?: number;
+      lineAccountId?: string | null;
+    }>();
+    const { lineAccountId, ...updates } = body;
+    await updateAutomation(c.env.DB, id, updates);
+    await updateAutomationLineAccountCompat(c.env.DB, id, lineAccountId);
     const updated = await getAutomationById(c.env.DB, id);
     if (!updated) return c.json({ success: false, error: 'Not found' }, 404);
     return c.json({

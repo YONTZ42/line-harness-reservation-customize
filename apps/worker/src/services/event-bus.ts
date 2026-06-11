@@ -233,6 +233,20 @@ function matchConditions(
     if (!postbackData.includes(String(conditions.postbackDataContains))) return false;
   }
 
+  if (conditions.action !== undefined) {
+    const action = String(payload.eventData?.action ?? '');
+    const postbackData = String(payload.eventData?.postbackData ?? payload.eventData?.rawData ?? '');
+    const expected = String(conditions.action);
+    if (action !== expected && postbackData !== `action=${expected}` && !postbackData.includes(`action=${expected}`)) {
+      return false;
+    }
+  }
+
+  if (conditions.postbackAction !== undefined) {
+    const action = String(payload.eventData?.action ?? '');
+    if (action !== String(conditions.postbackAction)) return false;
+  }
+
   if (conditions.eventDataEquals && typeof conditions.eventDataEquals === 'object') {
     for (const [key, expected] of Object.entries(conditions.eventDataEquals as Record<string, unknown>)) {
       if (String(payload.eventData?.[key] ?? '') !== String(expected)) return false;

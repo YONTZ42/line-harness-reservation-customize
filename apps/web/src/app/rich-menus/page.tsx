@@ -83,8 +83,8 @@ function toAction(area: AreaForm): RichMenuAction {
   const value = area.value.trim()
   if (area.type === 'message') return { type: 'message', text: value, label }
   if (area.type === 'postback') {
-    const displayText = area.displayText.trim() || area.label.trim() || value
-    return { type: 'postback', data: value, displayText, label }
+    const displayText = area.displayText.trim()
+    return { type: 'postback', data: value, ...(displayText ? { displayText } : {}), label }
   }
   if (area.type === 'richmenuswitch') {
     return {
