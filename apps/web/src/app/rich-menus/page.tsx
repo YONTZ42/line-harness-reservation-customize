@@ -215,7 +215,7 @@ export default function RichMenusPage() {
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null)
   const [areaDrag, setAreaDrag] = useState<AreaDragState | null>(null)
   const [imagePreviews, setImagePreviews] = useState<Record<string, { url: string; key: string; mimeType: string }>>({})
-  const [aliasForm, setAliasForm] = useState({ richMenuAliasId: '', richMenuId: '' })
+  const [aliasForm, setAliasForm] = useState({ richMenuAliasId: '', richMenuId: '', oldRichMenuId: '' })
   const [form, setForm] = useState({
     name: 'メインメニュー',
     chatBarText: 'メニュー',
@@ -582,6 +582,34 @@ export default function RichMenusPage() {
     }
   }
 
+  async function handleReplaceAliasAndDeleteOld() {
+    const richMenuAliasId = aliasForm.richMenuAliasId.trim()
+    const richMenuId = aliasForm.richMenuId.trim()
+    const oldRichMenuId = aliasForm.oldRichMenuId.trim()
+    if (!richMenuAliasId || !richMenuId || !oldRichMenuId) {
+      setError('エイリアスID、新しいリッチメニューID、削除する旧リッチメニューIDを入力してください')
+      return
+    }
+    if (richMenuId === oldRichMenuId) {
+      setError('新しいリッチメニューIDと削除する旧リッチメニューIDが同じです')
+      return
+    }
+    const ok = confirm(`エイリアス ${richMenuAliasId} を新IDへ差し替えた後、旧リッチメニュー ${oldRichMenuId} を削除します。実行しますか？`)
+    if (!ok) return
+    setError('')
+    setNotice('')
+    try {
+      const client = createLineHarnessClient(selectedAccountId)
+      await client.richMenus.saveAlias(richMenuAliasId, richMenuId, { upsert: true })
+      await client.richMenus.delete(oldRichMenuId)
+      setNotice(`エイリアス ${richMenuAliasId} を ${richMenuId} に差し替え、旧リッチメニュー ${oldRichMenuId} を削除しました`)
+      setAliasForm((prev) => ({ ...prev, oldRichMenuId: '' }))
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'エイリアス差し替えまたは旧リッチメニュー削除に失敗しました')
+    }
+  }
+
   async function handleDeleteAlias() {
     const richMenuAliasId = aliasForm.richMenuAliasId.trim()
     if (!richMenuAliasId) {
@@ -655,6 +683,21 @@ export default function RichMenusPage() {
             <button onClick={() => void handleSaveAlias()} className="rounded-lg bg-gray-900 px-3 py-2 text-sm font-medium text-white">保存</button>
             <button onClick={() => void handleDeleteAlias()} className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-600">削除</button>
           </div>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">
+          <select
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+            value={aliasForm.oldRichMenuId}
+            onChange={(e) => setAliasForm((prev) => ({ ...prev, oldRichMenuId: e.target.value }))}
+          >
+            <option value="">差し替え後に削除する旧リッチメニューを選択</option>
+            {menus.map((menu) => (
+              <option key={menu.richMenuId} value={menu.richMenuId}>{menu.name} / {menu.richMenuId}</option>
+            ))}
+          </select>
+          <button onClick={() => void handleReplaceAliasAndDeleteOld()} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white">
+            差し替えて旧メニュー削除
+          </button>
         </div>
       </section>
 
@@ -970,6 +1013,9 @@ export default function RichMenusPage() {
                 </button>
                 <button onClick={() => setAliasForm((prev) => ({ ...prev, richMenuId: menu.richMenuId }))} className="px-3 py-2 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">
                   エイリアス対象にする
+                </button>
+                <button onClick={() => setAliasForm((prev) => ({ ...prev, oldRichMenuId: menu.richMenuId }))} className="px-3 py-2 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg">
+                  旧メニューに指定
                 </button>
                 <button onClick={() => void handleDelete(menu.richMenuId)} className="px-3 py-2 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg">
                   削除

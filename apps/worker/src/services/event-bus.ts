@@ -154,8 +154,25 @@ async function processAutomations(
     );
 
     for (const automation of automations) {
-      const conditions = JSON.parse(automation.conditions) as Record<string, unknown>;
-      const actions = JSON.parse(automation.actions) as Array<{ type: string; params: Record<string, string> }>;
+      let conditions: Record<string, unknown>;
+      let actions: Array<{ type: string; params: Record<string, string> }>;
+      try {
+        conditions = JSON.parse(automation.conditions) as Record<string, unknown>;
+        const parsedActions = JSON.parse(automation.actions) as unknown;
+        if (!Array.isArray(parsedActions)) {
+          throw new Error('actions must be an array');
+        }
+        actions = parsedActions as Array<{ type: string; params: Record<string, string> }>;
+      } catch (err) {
+        await createAutomationLog(db, {
+          automationId: automation.id,
+          friendId: payload.friendId,
+          eventData: JSON.stringify(payload.eventData ?? {}),
+          actionsResult: JSON.stringify([{ action: 'parse', success: false, error: err instanceof Error ? err.message : String(err) }]),
+          status: 'failed',
+        });
+        continue;
+      }
 
       // 条件チェック（簡易版: 条件が空なら常にマッチ）
       if (!matchConditions(conditions, payload)) continue;
@@ -224,8 +241,10 @@ function matchConditions(
   }
 
   if (conditions.postbackData !== undefined) {
+    const expected = String(conditions.postbackData);
+    const action = String(payload.eventData?.action ?? '');
     const postbackData = String(payload.eventData?.postbackData ?? payload.eventData?.rawData ?? '');
-    if (postbackData !== String(conditions.postbackData)) return false;
+    if (postbackData !== expected && action !== expected) return false;
   }
 
   if (conditions.postbackDataContains !== undefined) {
@@ -288,12 +307,12 @@ async function executeAction(
       break;
 
     case 'send_message': {
-      if (!lineAccessToken || !friendId) break;
+      if (!lineAccessToken || !friendId) throw new Error('lineAccessToken and friendId are required for send_message');
       const friend = await db
         .prepare('SELECT line_user_id FROM friends WHERE id = ?')
         .bind(friendId)
         .first<{ line_user_id: string }>();
-      if (!friend) break;
+      if (!friend) throw new Error(`friend not found: ${friendId}`);
       const lineClient = new LineClient(lineAccessToken);
       const msgType = action.params.messageType || 'text';
       const messages = buildMessages(msgType, action.params.content, action.params.altText);

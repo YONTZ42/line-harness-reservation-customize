@@ -349,7 +349,7 @@ async function handleEvent(
           ...postbackParams,
         },
       },
-      accessToken,
+      lineAccessToken,
       lineAccountId,
     ).catch((err) => {
       console.warn('rich_menu.tap automation failed:', err);

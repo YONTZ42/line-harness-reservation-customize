@@ -34,6 +34,16 @@ interface Automation {
   updatedAt: string
 }
 
+interface AutomationLogItem {
+  id: string
+  automationId: string
+  friendId: string | null
+  eventData: unknown
+  actionsResult: unknown
+  status: 'success' | 'partial' | 'failed'
+  createdAt: string
+}
+
 const eventTypeOptions: { value: AutomationEventType; label: string }[] = [
   { value: 'friend_add', label: '友だち追加' },
   { value: 'tag_change', label: 'タグ変更' },
@@ -116,6 +126,8 @@ export default function AutomationsPage() {
   const [formError, setFormError] = useState('')
   const [templates, setTemplates] = useState<TemplateOption[]>([])
   const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [logsByAutomation, setLogsByAutomation] = useState<Record<string, AutomationLogItem[]>>({})
+  const [logsLoadingId, setLogsLoadingId] = useState<string | null>(null)
 
   const loadAutomations = useCallback(async () => {
     setLoading(true)
@@ -354,6 +366,43 @@ export default function AutomationsPage() {
     } catch {
       setError('削除に失敗しました')
     }
+  }
+
+  const loadAutomationLogs = async (id: string) => {
+    if (logsByAutomation[id]) {
+      setLogsByAutomation((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+      return
+    }
+    setLogsLoadingId(id)
+    setError('')
+    try {
+      const res = await api.automations.logs(id, 5)
+      if (res.success) {
+        setLogsByAutomation((prev) => ({ ...prev, [id]: res.data as unknown as AutomationLogItem[] }))
+      } else {
+        setError(res.error)
+      }
+    } catch {
+      setError('オートメーションログの取得に失敗しました')
+    } finally {
+      setLogsLoadingId(null)
+    }
+  }
+
+  const formatLogValue = (value: unknown) => {
+    if (value == null || value === '') return 'なし'
+    if (typeof value === 'string') {
+      try {
+        return JSON.stringify(JSON.parse(value), null, 2)
+      } catch {
+        return value
+      }
+    }
+    return JSON.stringify(value, null, 2)
   }
 
   return (
@@ -671,20 +720,46 @@ export default function AutomationsPage() {
 
               {/* Actions */}
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+	                <button
+	                  onClick={() => startEdit(automation)}
+	                  className="px-3 py-1 min-h-[44px] text-xs font-medium text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+	                >
+	                  編集
+	                </button>
                 <button
-                  onClick={() => startEdit(automation)}
-                  className="px-3 py-1 min-h-[44px] text-xs font-medium text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                  onClick={() => void loadAutomationLogs(automation.id)}
+                  className="px-3 py-1 min-h-[44px] text-xs font-medium text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
                 >
-                  編集
+                  {logsLoadingId === automation.id ? '読込中' : logsByAutomation[automation.id] ? 'ログを閉じる' : 'ログ'}
                 </button>
-                <button
-                  onClick={() => handleDelete(automation.id)}
-                  className="px-3 py-1 min-h-[44px] text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
-                >
-                  削除
-                </button>
-              </div>
-            </div>
+	                <button
+	                  onClick={() => handleDelete(automation.id)}
+	                  className="px-3 py-1 min-h-[44px] text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
+	                >
+	                  削除
+	                </button>
+	              </div>
+              {logsByAutomation[automation.id] && (
+                <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
+                  <p className="text-xs font-semibold text-gray-700">直近ログ</p>
+                  <div className="mt-2 space-y-2">
+                    {logsByAutomation[automation.id].length === 0 ? (
+                      <p className="text-xs text-gray-400">まだ実行ログがありません。条件不一致の場合もログは作られません。</p>
+                    ) : logsByAutomation[automation.id].map((log) => (
+                      <details key={log.id} className="rounded-md bg-white p-2 text-xs">
+                        <summary className="cursor-pointer font-medium text-gray-700">
+                          {log.status} / {log.createdAt}
+                        </summary>
+                        <p className="mt-2 font-semibold text-gray-500">eventData</p>
+                        <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-2 text-[11px] text-gray-700">{formatLogValue(log.eventData)}</pre>
+                        <p className="mt-2 font-semibold text-gray-500">actionsResult</p>
+                        <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-2 text-[11px] text-gray-700">{formatLogValue(log.actionsResult)}</pre>
+                      </details>
+                    ))}
+                  </div>
+                </div>
+              )}
+	            </div>
           ))}
         </div>
       )}
