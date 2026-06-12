@@ -15,6 +15,7 @@ import type { Form as DbForm, FormSubmission as DbFormSubmission } from '@line-c
 import type { Env } from '../index.js';
 import { defaultLineAccessToken } from '../services/line-bindings.js';
 import { notifyFormSubmissionToDiscord } from '../services/discord-notifications.js';
+import { hasColumn } from '../utils/db-compat.js';
 
 const forms = new Hono<Env>();
 
@@ -237,7 +238,7 @@ forms.post('/api/forms/:id/partial', async (c) => {
     const body = await c.req.json<{ lineUserId?: string; friendId?: string; data?: Record<string, unknown> }>();
 
     // Resolve friend
-    let friend = body.friendId
+    const friend = body.friendId
       ? await getFriendById(c.env.DB, body.friendId)
       : body.lineUserId
         ? await getFriendByLineUserId(c.env.DB, body.lineUserId)
@@ -247,8 +248,12 @@ forms.post('/api/forms/:id/partial', async (c) => {
       return c.json({ success: false, error: 'Friend not found' }, 404);
     }
 
+    if (!await hasColumn(c.env.DB, 'friends', 'metadata')) {
+      return c.json({ success: true, skipped: 'friends.metadata column is not available' });
+    }
+
     // Save survey data to friend metadata (merge with existing)
-    const existingMeta = friend.metadata ? JSON.parse(friend.metadata) : {};
+    const existingMeta = (friend as unknown as { metadata?: string }).metadata ? JSON.parse((friend as unknown as { metadata?: string }).metadata || '{}') : {};
     const merged = { ...existingMeta, ...body.data };
     await c.env.DB.prepare(
       'UPDATE friends SET metadata = ?, updated_at = ? WHERE id = ?',
@@ -367,6 +372,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
     if (friendId) {
       const db = c.env.DB;
       const now = jstNow();
+      const hasFriendMetadata = await hasColumn(db, 'friends', 'metadata');
 
       // Resolve reward template per-campaign.
       //
@@ -400,12 +406,12 @@ forms.post('/api/forms/:id/submit', async (c) => {
       const sideEffects: Promise<unknown>[] = [];
 
       // Save response data to friend's metadata
-      if (form.save_to_metadata) {
+      if (form.save_to_metadata && hasFriendMetadata) {
         sideEffects.push(
           (async () => {
             const friend = await getFriendById(db, friendId!);
             if (!friend) return;
-            const existing = JSON.parse(friend.metadata || '{}') as Record<string, unknown>;
+            const existing = JSON.parse((friend as unknown as { metadata?: string }).metadata || '{}') as Record<string, unknown>;
             const merged = { ...existing, ...submissionData };
             await db
               .prepare(`UPDATE friends SET metadata = ?, updated_at = ? WHERE id = ?`)
@@ -493,12 +499,15 @@ forms.post('/api/forms/:id/submit', async (c) => {
           const { buildMessage, buildMessages, expandVariables } = await import('../services/step-delivery.js');
           const apiOrigin = new URL(c.req.url).origin;
           const { resolveMetadata } = await import('../services/step-delivery.js');
-          const resolvedMeta = await resolveMetadata(c.env.DB, { user_id: (friend as unknown as Record<string, string | null>).user_id, metadata: (friend as unknown as Record<string, string | null>).metadata });
+          const friendRecord = friend as unknown as Record<string, string | null>;
+          const resolvedMeta = hasFriendMetadata
+            ? await resolveMetadata(c.env.DB, { user_id: friendRecord.user_id, metadata: friendRecord.metadata })
+            : {};
           const friendData = {
             id: friend.id,
             display_name: friend.display_name,
-            user_id: (friend as unknown as Record<string, string | null>).user_id,
-            ref_code: (friend as unknown as Record<string, string | null>).ref_code,
+            user_id: friendRecord.user_id,
+            ref_code: friendRecord.ref_code,
             metadata: resolvedMeta,
           };
 

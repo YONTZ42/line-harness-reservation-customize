@@ -2,6 +2,7 @@ import type {
   ExternalReservationSourceRow,
   Form,
   FormSubmission,
+  Friend,
   Reservation,
 } from '@line-crm/db';
 import { getFriendById, listExternalReservationSources, listReservations } from '@line-crm/db';
@@ -114,6 +115,7 @@ export async function notifyFormSubmissionToDiscord(
   const friend = submission.friend_id ? await getFriendById(db, submission.friend_id).catch(() => null) : null;
   const fields = parseFormFields(form.fields);
   const consoleUrl = await consoleV2Url(env);
+  const lineAccountId = (friend as Pick<Friend, 'line_account_id'> | null)?.line_account_id ?? null;
   const answerLines = Object.entries(submissionData)
     .map(([key, value]) => {
       const label = fields.get(key) || key;
@@ -137,7 +139,7 @@ export async function notifyFormSubmissionToDiscord(
       timestamp: new Date().toISOString(),
     }],
     components: genericLinkComponents(consoleUrl, '簡易コンソールを開く'),
-  });
+  }, lineAccountId);
 }
 
 export async function notifyGmailImportRunToDiscord(
@@ -224,9 +226,13 @@ async function sendDiscordNotification(
   env: DiscordNotificationEnv,
   topic: DiscordNotificationTopic,
   payload: DiscordPayload,
+  lineAccountId?: string | null,
 ): Promise<void> {
-  const url = await resolveDiscordWebhookUrl(env, topic);
-  if (!url) return;
+  const url = await resolveDiscordWebhookUrl(env, topic, lineAccountId);
+  if (!url) {
+    console.warn(`[discord] ${topic} webhook URL is not configured`, { lineAccountId: lineAccountId ?? null });
+    return;
+  }
 
   const response = await fetch(url, {
     method: 'POST',
@@ -242,7 +248,7 @@ async function sendDiscordNotification(
   }
 }
 
-async function resolveDiscordWebhookUrl(env: DiscordNotificationEnv, topic: DiscordNotificationTopic): Promise<string> {
+async function resolveDiscordWebhookUrl(env: DiscordNotificationEnv, topic: DiscordNotificationTopic, lineAccountId?: string | null): Promise<string> {
   const db = env.DB;
   const settingTopicUrl = db
     ? await getAccountSetting(
@@ -255,6 +261,7 @@ async function resolveDiscordWebhookUrl(env: DiscordNotificationEnv, topic: Disc
           : topic === 'form'
             ? 'discord.form_webhook_url'
             : 'discord.review_webhook_url',
+      lineAccountId,
     ).catch(() => '')　
     : '';
   const topicUrl = await resolveBindingValue(
@@ -267,7 +274,7 @@ async function resolveDiscordWebhookUrl(env: DiscordNotificationEnv, topic: Disc
           : env.DISCORD_REVIEW_WEBHOOK_URL,
   );
   const settingBaseUrl = db
-    ? await getAccountSetting(db, env as DiscordNotificationEnv & { DB: D1Database }, 'discord.webhook_url').catch(() => '')
+    ? await getAccountSetting(db, env as DiscordNotificationEnv & { DB: D1Database }, 'discord.webhook_url', lineAccountId).catch(() => '')
     : '';
   const baseUrl = settingTopicUrl || topicUrl || settingBaseUrl || await resolveBindingValue(env.DISCORD_WEBHOOK_URL);
   if (!baseUrl) return '';
@@ -283,6 +290,7 @@ async function resolveDiscordWebhookUrl(env: DiscordNotificationEnv, topic: Disc
           : topic === 'form'
             ? 'discord.form_thread_id'
             : 'discord.review_thread_id',
+      lineAccountId,
     ).catch(() => '')
     : '';
   const threadId = await resolveBindingValue(
