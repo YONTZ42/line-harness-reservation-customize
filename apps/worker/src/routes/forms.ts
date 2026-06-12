@@ -531,7 +531,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
             header: {
               type: 'box', layout: 'vertical',
               contents: [
-                { type: 'text', text: '診断結果', size: 'lg', weight: 'bold', color: '#1e293b' },
+                { type: 'text', text: '申込内容', size: 'lg', weight: 'bold', color: '#1e293b' },
                 { type: 'text', text: `${friend.display_name || ''}さんの回答`, size: 'xs', color: '#64748b', margin: 'sm' },
               ],
               paddingAll: '20px', backgroundColor: '#f0fdf4',
@@ -541,7 +541,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
               contents: [
                 ...answerRows,
                 { type: 'separator', margin: 'lg' },
-                { type: 'text', text: '他社サービスでは、フォームの回答内容に合わせたリアルタイム返信はできません。LINE Harnessだからこそ可能な体験です。', size: 'xs', color: '#06C755', weight: 'bold', wrap: true, margin: 'lg' },
+                { type: 'text', text: '申し込みありがとうございます。撮影可能な日程を確認し、LINEから返信いたします。', size: 'xs', color: '#06C755', weight: 'bold', wrap: true, margin: 'lg' },
               ],
               paddingAll: '20px',
             },

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { LineMessageBubble } from '@/components/line-message-bubble'
 import { fetchApi } from '@/lib/api'
 import type { ConsoleForm, ConsoleTag, FormDraft } from '../types'
 import { formatDateTime } from '../utils'
@@ -19,6 +20,8 @@ type FormWithFields = ConsoleForm & {
   fields?: ManagedField[] | string
   isActive?: boolean
   saveToMetadata?: boolean
+  onSubmitMessageType?: 'text' | 'flex' | null
+  onSubmitMessageContent?: string | null
 }
 
 type FormSubmission = {
@@ -30,6 +33,23 @@ type FormSubmission = {
   createdAt: string
 }
 
+type ChatDetail = {
+  id: string
+  friendId: string
+  friendName: string
+  friendPictureUrl?: string | null
+  messages?: Array<{
+    id: string
+    content: string
+    messageType?: string
+    senderType?: string
+    direction?: 'incoming' | 'outgoing'
+    createdAt: string
+  }>
+}
+
+type ReplyMode = 'none' | 'text' | 'flex'
+
 export function FormsTab({
   forms,
   tags,
@@ -38,7 +58,6 @@ export function FormsTab({
   creating,
   onCreateForm,
   onFormsChanged,
-  onOpenFriendChat,
 }: {
   forms: ConsoleForm[]
   tags: ConsoleTag[]
@@ -47,7 +66,6 @@ export function FormsTab({
   creating: boolean
   onCreateForm: () => void
   onFormsChanged: () => void
-  onOpenFriendChat: (friendId: string) => void
 }) {
   const [selectedForm, setSelectedForm] = useState<FormWithFields | null>(null)
   const [submissions, setSubmissions] = useState<FormSubmission[]>([])
@@ -61,6 +79,14 @@ export function FormsTab({
   const [editorFields, setEditorFields] = useState<ManagedField[]>([emptyField(1)])
   const [editorActive, setEditorActive] = useState(true)
   const [editorSaveToMetadata, setEditorSaveToMetadata] = useState(true)
+  const [replyForm, setReplyForm] = useState<FormWithFields | null>(null)
+  const [replyLoading, setReplyLoading] = useState(false)
+  const [replySaving, setReplySaving] = useState(false)
+  const [replyMode, setReplyMode] = useState<ReplyMode>('none')
+  const [replyContent, setReplyContent] = useState('')
+  const [submissionView, setSubmissionView] = useState<'list' | 'chat'>('list')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatDetail, setChatDetail] = useState<ChatDetail | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -113,6 +139,68 @@ export function FormsTab({
       setError(err instanceof Error ? err.message : 'フォーム詳細を取得できませんでした。')
     } finally {
       setEditorLoading(false)
+    }
+  }
+
+  async function openReplySettings(form: FormWithFields) {
+    setReplyForm(form)
+    setReplyLoading(true)
+    setReplyMode('none')
+    setReplyContent('')
+    setNotice('')
+    setError('')
+    try {
+      const res = await fetchApi<{ success: boolean; data: FormWithFields; error?: string }>(`/api/forms/${encodeURIComponent(form.id)}`)
+      if (!res.success) throw new Error(res.error || 'フォーム詳細を取得できませんでした。')
+      setReplyForm(res.data)
+      const type = res.data.onSubmitMessageType
+      setReplyMode(type === 'text' || type === 'flex' ? type : 'none')
+      setReplyContent(res.data.onSubmitMessageContent || '')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '回答後LINE返信設定を取得できませんでした。')
+    } finally {
+      setReplyLoading(false)
+    }
+  }
+
+  async function saveReplySettings() {
+    if (!replyForm) return
+    if (replyMode !== 'none' && !replyContent.trim()) {
+      setError('返信内容を入力してください。')
+      return
+    }
+    setReplySaving(true)
+    setError('')
+    setNotice('')
+    try {
+      const body = replyMode === 'none'
+        ? { onSubmitMessageType: null, onSubmitMessageContent: null }
+        : { onSubmitMessageType: replyMode, onSubmitMessageContent: replyContent.trim() }
+      const res = await fetchApi<{ success: boolean; data: FormWithFields; error?: string }>(`/api/forms/${encodeURIComponent(replyForm.id)}`, { method: 'PUT', body: JSON.stringify(body) })
+      if (!res.success) throw new Error(res.error || '回答後LINE返信設定の保存に失敗しました。')
+      setReplyForm(res.data)
+      setNotice('回答後LINE返信設定を保存しました。')
+      onFormsChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '回答後LINE返信設定の保存に失敗しました。')
+    } finally {
+      setReplySaving(false)
+    }
+  }
+
+  async function openSubmissionChat(friendId: string) {
+    setSubmissionView('chat')
+    setChatLoading(true)
+    setChatDetail(null)
+    setError('')
+    try {
+      const res = await fetchApi<{ success: boolean; data: ChatDetail; error?: string }>(`/api/chats/${encodeURIComponent(friendId)}`)
+      if (!res.success) throw new Error(res.error || 'チャットを取得できませんでした。')
+      setChatDetail(res.data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'チャットを取得できませんでした。')
+    } finally {
+      setChatLoading(false)
     }
   }
 
@@ -219,14 +307,18 @@ export function FormsTab({
       </div>
 
       {editorOpen && (
-        <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-sm">
+        <div className="fixed inset-0 z-50 flex items-end bg-black/45 p-0 sm:items-center sm:p-4">
+        <section className="flex max-h-[94vh] w-full flex-col rounded-t-3xl bg-white shadow-2xl sm:mx-auto sm:max-w-6xl sm:rounded-3xl">
+        <div className="border-b border-gray-100 p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-black text-gray-950">{editingFormId ? 'フォーム編集' : 'フォーム新規作成'}</p>
-              <p className="mt-1 text-xs text-gray-500">console-v2内で項目を編集して保存します。</p>
+              <p className="text-lg font-black text-gray-950">{editingFormId ? 'フォーム編集' : 'フォーム新規作成'}</p>
+              <p className="mt-1 text-xs text-gray-500">フォーム項目を編集して、右側のプレビューで確認します。</p>
             </div>
-            <button onClick={() => setEditorOpen(false)} className="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-700">閉じる</button>
+            <button onClick={() => setEditorOpen(false)} className="rounded-full bg-gray-100 px-3 py-1.5 text-sm font-bold text-gray-700">閉じる</button>
           </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {editorLoading ? (
             <p className="mt-4 rounded-2xl bg-gray-50 p-5 text-center text-sm text-gray-400">読み込み中...</p>
           ) : (
@@ -271,6 +363,8 @@ export function FormsTab({
             </div>
           )}
         </div>
+        </section>
+        </div>
       )}
 
       {normalizedForms.length === 0 ? (
@@ -280,7 +374,13 @@ export function FormsTab({
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {normalizedForms.map((form) => (
-            <FormCard key={form.id} form={form} onEdit={() => void openEditor(form)} onOpenSubmissions={() => void openSubmissions(form)} />
+            <FormCard
+              key={form.id}
+              form={form}
+              onEdit={() => void openEditor(form)}
+              onOpenSubmissions={() => void openSubmissions(form)}
+              onOpenReplySettings={() => void openReplySettings(form)}
+            />
           ))}
         </div>
       )}
@@ -290,15 +390,42 @@ export function FormsTab({
           form={selectedForm}
           submissions={submissions}
           loading={loadingSubmissions}
-          onClose={() => setSelectedForm(null)}
-          onOpenFriendChat={onOpenFriendChat}
+          view={submissionView}
+          chatDetail={chatDetail}
+          chatLoading={chatLoading}
+          onBackToList={() => setSubmissionView('list')}
+          onClose={() => { setSelectedForm(null); setSubmissionView('list'); setChatDetail(null) }}
+          onOpenFriendChat={(friendId) => void openSubmissionChat(friendId)}
+        />
+      )}
+      {replyForm && (
+        <ReplySettingsModal
+          form={replyForm}
+          loading={replyLoading}
+          saving={replySaving}
+          mode={replyMode}
+          content={replyContent}
+          setMode={setReplyMode}
+          setContent={setReplyContent}
+          onSave={() => void saveReplySettings()}
+          onClose={() => setReplyForm(null)}
         />
       )}
     </section>
   )
 }
 
-function FormCard({ form, onEdit, onOpenSubmissions }: { form: FormWithFields; onEdit: () => void; onOpenSubmissions: () => void }) {
+function FormCard({
+  form,
+  onEdit,
+  onOpenSubmissions,
+  onOpenReplySettings,
+}: {
+  form: FormWithFields
+  onEdit: () => void
+  onOpenSubmissions: () => void
+  onOpenReplySettings: () => void
+}) {
   const fields = useMemo(() => normalizeFields(form.fields), [form.fields])
   return (
     <article className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -308,12 +435,15 @@ function FormCard({ form, onEdit, onOpenSubmissions }: { form: FormWithFields; o
           <p className="mt-1 text-xs text-gray-500">{form.description || '説明なし'}</p>
           <p className="mt-2 text-xs font-bold text-gray-400">{form.submitCount || 0}件 / {form.isActive === false ? '停止中' : '受付中'}</p>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
           <button onClick={onEdit} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50">
             編集
           </button>
           <button onClick={onOpenSubmissions} className="rounded-xl bg-emerald-500 px-3 py-2 text-xs font-bold text-white">
-            回答
+            回答を見る
+          </button>
+          <button onClick={onOpenReplySettings} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100">
+            回答後LINE返信
           </button>
         </div>
       </div>
@@ -358,16 +488,94 @@ function PreviewField({ field }: { field: ManagedField }) {
   )
 }
 
+function ReplySettingsModal({
+  form,
+  loading,
+  saving,
+  mode,
+  content,
+  setMode,
+  setContent,
+  onSave,
+  onClose,
+}: {
+  form: FormWithFields
+  loading: boolean
+  saving: boolean
+  mode: ReplyMode
+  content: string
+  setMode: (mode: ReplyMode) => void
+  setContent: (value: string) => void
+  onSave: () => void
+  onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-black/45 p-0 sm:items-center sm:p-4">
+      <section className="max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:mx-auto sm:max-w-3xl sm:rounded-3xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-lg font-black text-gray-950">回答後LINE返信</p>
+            <p className="mt-1 text-sm text-gray-500">{form.name}</p>
+          </div>
+          <button onClick={onClose} className="rounded-full bg-gray-100 px-3 py-1.5 text-sm font-bold text-gray-700">閉じる</button>
+        </div>
+        {loading ? (
+          <p className="mt-4 rounded-2xl bg-gray-50 p-5 text-center text-sm text-gray-400">読み込み中...</p>
+        ) : (
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-2 sm:grid-cols-3">
+              {(['none', 'text', 'flex'] as ReplyMode[]).map((item) => (
+                <button
+                  key={item}
+                  onClick={() => setMode(item)}
+                  className={`rounded-xl border px-3 py-2 text-sm font-bold ${mode === item ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                >
+                  {item === 'none' ? '送らない' : item === 'text' ? 'テキスト' : 'Flex JSON'}
+                </button>
+              ))}
+            </div>
+            {mode !== 'none' && (
+              <textarea
+                value={content}
+                onChange={(event) => setContent(event.target.value)}
+                rows={mode === 'flex' ? 14 : 6}
+                className="w-full resize-y rounded-xl border border-gray-200 px-3 py-2 font-mono text-sm"
+                placeholder={mode === 'text' ? '回答ありがとうございます。担当者からご連絡します。' : '{"type":"bubble","body":{"type":"box","layout":"vertical","contents":[]}}'}
+              />
+            )}
+            <div className="rounded-2xl bg-gray-50 p-4 text-xs text-gray-500">
+              使える変数: {'{{name}}'} / {'{{uid}}'} / {'{{friend_id}}'} / {'{{ref}}'} / {'{{metadata.保存キー}}'}
+            </div>
+            <div className="flex justify-end">
+              <button onClick={onSave} disabled={saving} className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+                {saving ? '保存中' : '保存'}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
 function SubmissionsModal({
   form,
   submissions,
   loading,
+  view,
+  chatDetail,
+  chatLoading,
+  onBackToList,
   onClose,
   onOpenFriendChat,
 }: {
   form: FormWithFields
   submissions: FormSubmission[]
   loading: boolean
+  view: 'list' | 'chat'
+  chatDetail: ChatDetail | null
+  chatLoading: boolean
+  onBackToList: () => void
   onClose: () => void
   onOpenFriendChat: (friendId: string) => void
 }) {
@@ -376,30 +584,39 @@ function SubmissionsModal({
       <section className="max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:mx-auto sm:max-w-4xl sm:rounded-3xl">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-lg font-black text-gray-950">{form.name} の回答</p>
-            <p className="mt-1 text-sm text-gray-500">回答者をタップするとチャットを開始できます。</p>
+            <p className="text-lg font-black text-gray-950">{view === 'chat' ? 'チャット' : `${form.name} の回答`}</p>
+            <p className="mt-1 text-sm text-gray-500">{view === 'chat' ? '戻るとフォーム回答リストに戻ります。' : '回答者のチャットを同じモーダル内で確認できます。'}</p>
           </div>
-          <button onClick={onClose} className="rounded-full bg-gray-100 px-3 py-1.5 text-sm font-bold text-gray-700">閉じる</button>
+          <div className="flex gap-2">
+            {view === 'chat' && <button onClick={onBackToList} className="rounded-full bg-gray-100 px-3 py-1.5 text-sm font-bold text-gray-700">戻る</button>}
+            <button onClick={onClose} className="rounded-full bg-gray-100 px-3 py-1.5 text-sm font-bold text-gray-700">閉じる</button>
+          </div>
         </div>
+        {view === 'chat' ? (
+          <ChatInSubmissionModal chatDetail={chatDetail} loading={chatLoading} />
+        ) : (
         <div className="mt-4 space-y-3">
           {loading ? (
             <p className="rounded-2xl bg-gray-50 p-5 text-center text-sm text-gray-400">読み込み中...</p>
           ) : submissions.length === 0 ? (
             <p className="rounded-2xl bg-gray-50 p-5 text-center text-sm text-gray-400">回答はありません。</p>
           ) : submissions.map((submission) => (
-            <button
+            <article
               key={submission.id}
-              type="button"
-              onClick={() => submission.friendId && onOpenFriendChat(submission.friendId)}
-              disabled={!submission.friendId}
-              className="w-full rounded-2xl border border-gray-100 bg-gray-50 p-4 text-left hover:bg-emerald-50 disabled:hover:bg-gray-50"
+              className="w-full rounded-2xl border border-gray-100 bg-gray-50 p-4 text-left"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-black text-gray-950">{submission.friendName || '名前未取得'}</p>
                   <p className="mt-1 text-xs text-gray-400">{formatDateTime(submission.createdAt)}</p>
                 </div>
-                <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-500">{submission.friendId ? 'チャット' : '未連携'}</span>
+                <button
+                  onClick={() => submission.friendId && onOpenFriendChat(submission.friendId)}
+                  disabled={!submission.friendId}
+                  className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-gray-700 hover:bg-emerald-50 disabled:opacity-50"
+                >
+                  {submission.friendId ? 'チャット' : '未連携'}
+                </button>
               </div>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {Object.entries(normalizeSubmissionData(submission.data)).slice(0, 6).map(([key, value]) => (
@@ -409,10 +626,53 @@ function SubmissionsModal({
                   </div>
                 ))}
               </div>
-            </button>
+            </article>
           ))}
         </div>
+        )}
       </section>
+    </div>
+  )
+}
+
+function ChatInSubmissionModal({ chatDetail, loading }: { chatDetail: ChatDetail | null; loading: boolean }) {
+  if (loading) return <p className="mt-4 rounded-2xl bg-gray-50 p-5 text-center text-sm text-gray-400">チャットを読み込み中...</p>
+  if (!chatDetail) return <p className="mt-4 rounded-2xl bg-gray-50 p-5 text-center text-sm text-gray-400">チャットを取得できませんでした。</p>
+  return (
+    <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+      <div className="mb-4 flex items-center gap-3">
+        {chatDetail.friendPictureUrl ? (
+          <img src={chatDetail.friendPictureUrl} alt="" className="h-10 w-10 rounded-full object-cover" />
+        ) : (
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-sm font-bold text-gray-500">
+            {chatDetail.friendName?.charAt(0) || '?'}
+          </div>
+        )}
+        <div>
+          <p className="text-sm font-black text-gray-950">{chatDetail.friendName}</p>
+          <p className="text-xs text-gray-400">メッセージ履歴</p>
+        </div>
+      </div>
+      {!chatDetail.messages?.length ? (
+        <p className="rounded-xl bg-white p-5 text-center text-sm text-gray-400">メッセージ履歴がありません。</p>
+      ) : (
+        <div className="max-h-[60vh] space-y-3 overflow-y-auto">
+          {chatDetail.messages.map((msg) => {
+            const outgoing = msg.direction === 'outgoing' || msg.senderType === 'operator'
+            return (
+              <LineMessageBubble
+                key={msg.id}
+                content={msg.content}
+                messageType={msg.messageType}
+                outgoing={outgoing}
+                createdAt={msg.createdAt}
+                avatarUrl={chatDetail.friendPictureUrl || undefined}
+                maxWidth={outgoing || msg.messageType !== 'flex' ? 320 : 300}
+              />
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
