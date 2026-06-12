@@ -229,20 +229,26 @@ app.get('/r/:ref', async (c) => {
   const formId = c.req.query('form') || '';
   const baseUrl = new URL(c.req.url).origin;
 
-  // Resolve LIFF URL from pool (same logic as /auth/line)
+  // Resolve LIFF URL from pool (same logic as /auth/line).
+  // Older client databases may not have traffic_pools/pool_accounts yet; /r links
+  // must still work with the default LIFF_URL instead of returning 500.
   let liffUrl = await defaultLiffUrl(c.env);
   const poolSlug = c.req.query('pool') || 'main';
-  const pool = await getTrafficPoolBySlug(c.env.DB, poolSlug);
-  if (pool) {
-    const account = await getRandomPoolAccount(c.env.DB, pool.id);
-    if (account) {
-      if (account.liff_id) liffUrl = `https://liff.line.me/${account.liff_id}`;
-    } else {
-      const allAccounts = await getPoolAccounts(c.env.DB, pool.id);
-      if (allAccounts.length === 0) {
-        if (pool.liff_id) liffUrl = `https://liff.line.me/${pool.liff_id}`;
+  try {
+    const pool = await getTrafficPoolBySlug(c.env.DB, poolSlug);
+    if (pool) {
+      const account = await getRandomPoolAccount(c.env.DB, pool.id);
+      if (account) {
+        if (account.liff_id) liffUrl = `https://liff.line.me/${account.liff_id}`;
+      } else {
+        const allAccounts = await getPoolAccounts(c.env.DB, pool.id);
+        if (allAccounts.length === 0) {
+          if (pool.liff_id) liffUrl = `https://liff.line.me/${pool.liff_id}`;
+        }
       }
     }
+  } catch (err) {
+    console.warn('[short-link] traffic pool lookup skipped; falling back to default LIFF_URL', err);
   }
 
   // Build LIFF URL with params (direct link for Universal Link)
