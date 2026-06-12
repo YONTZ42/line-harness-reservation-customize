@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react'
 import Header from '@/components/layout/header'
 import { api, type ApiAccountSetting } from '@/lib/api'
 import CcPromptButton from '@/components/cc-prompt-button'
@@ -207,6 +207,12 @@ export default function WebhooksPage() {
     }
   }
 
+  const formDiscordSetting = discordSettings.find((setting) => setting.key === 'discord.form_webhook_url')
+  const formDiscordThreadSetting = discordSettings.find((setting) => setting.key === 'discord.form_thread_id')
+  const otherDiscordSettings = discordSettings.filter((setting) => (
+    setting.key !== 'discord.form_webhook_url' && setting.key !== 'discord.form_thread_id'
+  ))
+
   return (
     <div>
       <Header
@@ -370,7 +376,7 @@ export default function WebhooksPage() {
           <div className="mb-5">
             <h2 className="text-sm font-semibold text-gray-900">Discord通知設定</h2>
             <p className="mt-1 text-xs text-gray-500">
-              予約通知・当日予約・要確認通知の送信先を設定します。空欄の秘密値は既存値を維持します。
+              フォーム回答・予約通知・当日予約・要確認通知の送信先を設定します。空欄の秘密値は既存値を維持します。
             </p>
           </div>
           {discordNotice && (
@@ -378,26 +384,26 @@ export default function WebhooksPage() {
               {discordNotice}
             </div>
           )}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {discordSettings.map((setting) => (
-              <div key={setting.key}>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {setting.label}
-                  {setting.configured && (
-                    <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-[11px] text-green-700">
-                      設定済み{setting.encrypted ? '・暗号化' : ''}
-                    </span>
-                  )}
-                </label>
-                <input
-                  value={discordForm[setting.key] ?? ''}
-                  onChange={(e) => setDiscordForm((current) => ({ ...current, [setting.key]: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  placeholder={setting.secret && setting.configured ? `${setting.value}（変更時だけ入力）` : ''}
-                  type={setting.secret ? 'password' : 'text'}
-                />
-                <p className="mt-1 text-xs text-gray-400">{setting.description}</p>
+          {formDiscordSetting && (
+            <div className="mb-5 rounded-xl border border-green-100 bg-green-50 p-4">
+              <div className="mb-3">
+                <h3 className="text-sm font-semibold text-gray-900">フォーム回答通知</h3>
+                <p className="mt-1 text-xs text-gray-600">
+                  フォーム回答が送信されたら、回答内容・LINE友だち名・console-v2 URLをDiscordへ送ります。
+                </p>
               </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <DiscordSettingField setting={formDiscordSetting} discordForm={discordForm} setDiscordForm={setDiscordForm} />
+                {formDiscordThreadSetting && (
+                  <DiscordSettingField setting={formDiscordThreadSetting} discordForm={discordForm} setDiscordForm={setDiscordForm} />
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {otherDiscordSettings.map((setting) => (
+              <DiscordSettingField key={setting.key} setting={setting} discordForm={discordForm} setDiscordForm={setDiscordForm} />
             ))}
           </div>
           <div className="mt-5 flex justify-end">
@@ -564,6 +570,37 @@ export default function WebhooksPage() {
         )
       )}
       <CcPromptButton prompts={ccPrompts} />
+    </div>
+  )
+}
+
+function DiscordSettingField({
+  setting,
+  discordForm,
+  setDiscordForm,
+}: {
+  setting: ApiAccountSetting
+  discordForm: Record<string, string>
+  setDiscordForm: Dispatch<SetStateAction<Record<string, string>>>
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {setting.label}
+        {setting.configured && (
+          <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-[11px] text-green-700">
+            設定済み{setting.encrypted ? '・暗号化' : ''}
+          </span>
+        )}
+      </label>
+      <input
+        value={discordForm[setting.key] ?? ''}
+        onChange={(e) => setDiscordForm((current) => ({ ...current, [setting.key]: e.target.value }))}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+        placeholder={setting.secret && setting.configured ? `${setting.value}（変更時だけ入力）` : ''}
+        type={setting.secret ? 'password' : 'text'}
+      />
+      <p className="mt-1 text-xs text-gray-400">{setting.description}</p>
     </div>
   )
 }

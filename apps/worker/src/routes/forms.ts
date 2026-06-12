@@ -14,6 +14,7 @@ import { addTagToFriend, enrollFriendInScenario } from '@line-crm/db';
 import type { Form as DbForm, FormSubmission as DbFormSubmission } from '@line-crm/db';
 import type { Env } from '../index.js';
 import { defaultLineAccessToken } from '../services/line-bindings.js';
+import { notifyFormSubmissionToDiscord } from '../services/discord-notifications.js';
 
 const forms = new Hono<Env>();
 
@@ -356,6 +357,11 @@ forms.post('/api/forms/:id/submit', async (c) => {
       friendId: friendId || null,
       data: JSON.stringify(submissionData),
     });
+
+    c.executionCtx.waitUntil(
+      notifyFormSubmissionToDiscord(c.env.DB, form, submission, submissionData, c.env)
+        .catch((err) => console.error('Form submission Discord notification failed:', err)),
+    );
 
     // Side effects (best-effort, don't fail the request)
     if (friendId) {

@@ -82,9 +82,11 @@ export type Env = {
     DISCORD_RESERVATION_WEBHOOK_URL?: SecretLike;
     DISCORD_DAILY_WEBHOOK_URL?: SecretLike;
     DISCORD_REVIEW_WEBHOOK_URL?: SecretLike;
+    DISCORD_FORM_WEBHOOK_URL?: SecretLike;
     DISCORD_RESERVATION_THREAD_ID?: SecretLike;
     DISCORD_DAILY_THREAD_ID?: SecretLike;
     DISCORD_REVIEW_THREAD_ID?: SecretLike;
+    DISCORD_FORM_THREAD_ID?: SecretLike;
     RESEND_API_KEY?: SecretLike;
     RESEND_FROM_EMAIL?: SecretLike;
     RESEND_FROM_NAME?: SecretLike;
