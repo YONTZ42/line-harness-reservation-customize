@@ -538,7 +538,7 @@ export default function ConsoleV2Page() {
       )}
 
       {activeTab === 'forms' && (
-        <FormsTab forms={forms} tags={tags} draft={formDraft} setDraft={setFormDraft} creating={creatingForm} onCreateForm={handleCreateSimpleForm} onOpenFriendChat={handleOpenFriendChatById} />
+        <FormsTab forms={forms} tags={tags} draft={formDraft} setDraft={setFormDraft} creating={creatingForm} onCreateForm={handleCreateSimpleForm} onFormsChanged={() => void loadDashboard()} onOpenFriendChat={handleOpenFriendChatById} />
       )}
 
       {activeTab === 'analytics' && (
